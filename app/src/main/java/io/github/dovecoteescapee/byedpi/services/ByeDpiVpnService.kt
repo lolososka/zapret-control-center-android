@@ -251,22 +251,40 @@ class ByeDpiVpnService : LifecycleVpnService() {
         Log.i(TAG, "Stopping tun2socks")
 
         val fd = tunFd
-        if (fd != null) {
-            TProxyService.TProxyStopService()
-            fd.close()
-            tunFd = null
-        } else {
+        val configFile = tunConfigFile
+        tunFd = null
+        tunConfigFile = null
+
+        var failure: Exception? = null
+        fun cleanup(step: String, action: () -> Unit) {
+            try {
+                action()
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to $step", e)
+                if (failure == null) {
+                    failure = e
+                } else {
+                    failure?.addSuppressed(e)
+                }
+            }
+        }
+
+        if (fd == null) {
             Log.w(TAG, "VPN is not running")
+        } else {
+            cleanup("stop native tun2socks") { TProxyService.TProxyStopService() }
+            cleanup("close VPN descriptor") { fd.close() }
         }
 
-        try {
-            tunConfigFile?.delete()
-        } catch (e: SecurityException) {
-            Log.e(TAG, "Failed to delete config file", e)
-        } finally {
-            tunConfigFile = null
+        if (configFile != null) {
+            cleanup("delete tun2socks config") {
+                if (configFile.exists() && !configFile.delete()) {
+                    throw IllegalStateException("Could not delete ${configFile.absolutePath}")
+                }
+            }
         }
 
+        failure?.let { throw it }
         Log.i(TAG, "Tun2socks stopped")
     }
 

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources xmlns:tools="http://schemas.android.com/tools">
-    <style name="Theme.ZapretMobile" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+<resources>
+    <style name="Theme.ZapretMobile.Base" parent="Theme.MaterialComponents.DayNight.NoActionBar">
         <item name="colorPrimary">@color/zapret_violet</item>
         <item name="colorPrimaryVariant">@color/zapret_violet_dark</item>
         <item name="colorOnPrimary">@color/white</item>
@@ -13,13 +13,13 @@
         <item name="android:fontFamily">sans-serif</item>
         <item name="android:navigationBarColor">@color/zapret_mist</item>
         <item name="android:statusBarColor">@color/zapret_mist</item>
-        <item name="android:windowLightNavigationBar" tools:targetApi="27">true</item>
-        <item name="android:windowLightStatusBar" tools:targetApi="23">true</item>
         <item name="android:windowActionModeOverlay">true</item>
         <item name="android:windowNoTitle">true</item>
         <item name="windowActionModeOverlay">true</item>
         <item name="windowNoTitle">true</item>
     </style>
+
+    <style name="Theme.ZapretMobile" parent="Theme.ZapretMobile.Base" />
 
     <style name="Theme.ZapretMobile.Settings" parent="Theme.MaterialComponents.DayNight.DarkActionBar">
         <item name="colorPrimary">@color/zapret_violet</item>
