@@ -1,97 +1,71 @@
-# ByeDPI for Android
+# Zapret Mobile
 
-**English** | [Русский](README-ru.md)
+[![Android CI](https://github.com/lolososka/zapret-control-center-android/actions/workflows/android-ci.yml/badge.svg)](https://github.com/lolososka/zapret-control-center-android/actions/workflows/android-ci.yml)
+[![Лицензия: GPL v3](https://img.shields.io/badge/license-GPLv3-151515.svg)](LICENSE)
 
-<div style="text-align: center;">
-  <img alt="ByeDPI logo" src=".github/images/logo.svg" width="100%" height="200px">
-</div>
+Android-приложение от **lolososka** в стиле Zapret Control Center. Оно запускает локальный VPN-интерфейс Android и направляет трафик через локальный SOCKS5-прокси [ByeDPI](https://github.com/hufrea/byedpi). Root-права не нужны.
 
----
+> Проект готовится к первому самостоятельному выпуску. Пока APK не появился в разделе Releases, опубликованной стабильной версии нет. Debug APK из GitHub Actions предназначен только для проверки разработки.
 
-Android application that runs a local VPN service to bypass DPI (Deep Packet Inspection) and censorship.
+## Что важно знать
 
+- поддерживается Android 5.0 и новее (`minSdk 21`);
+- обработка происходит на устройстве, собственного удалённого VPN-сервера у проекта нет;
+- приложение не меняет внешний IP-адрес и не добавляет шифрование поверх HTTPS;
+- Android показывает системный значок VPN, потому что для перенаправления трафика используется `VpnService`;
+- одновременно обычно может работать только одно VPN-приложение, поэтому возможен конфликт с AdGuard, другими VPN и сетевыми фильтрами;
+- подходящая стратегия зависит от сети и провайдера.
 
-This application runs a SOCKS5 proxy [ByeDPI](https://github.com/hufrea/byedpi) and redirects all traffic through it.
+## Установка
 
-## Installation
+Готовые стабильные сборки будут публиковаться только в [GitHub Releases](https://github.com/lolososka/zapret-control-center-android/releases) и на [сайте Zapret Control Center](https://lolososka.github.io/zapret-discord-youtube/).
 
-[<img src="https://github.com/machiav3lli/oandbackupx/blob/034b226cea5c1b30eb4f6a6f313e4dadcbb0ece4/badge_github.png"
-    alt="Get it on GitHub"
-    height="80">](https://github.com/dovecoteescapee/ByeDPIAndroid/releases)
-[<img src="https://gitlab.com/IzzyOnDroid/repo/-/raw/master/assets/IzzyOnDroid.png"
-    alt="Get it on IzzyOnDroid"
-    height="80">](https://apt.izzysoft.de/fdroid/index/apk/io.github.dovecoteescapee.byedpi)
+Перед установкой проверяйте, что адрес страницы начинается с `github.com/lolososka/` или `lolososka.github.io/`. Контрольная сумма SHA-256 будет приложена к каждому выпуску.
 
-### Or use Obtainium
+## Сборка из исходников
 
-1. Install [Obtainium](https://github.com/ImranR98/Obtainium/blob/main/README.md#installation)
-2. Add the app by URL:  
-   `https://github.com/dovecoteescapee/ByeDPIAndroid`
+Текущий проект намеренно сохраняет проверенный стек исходного форка:
 
-## Settings
+| Компонент | Версия |
+| --- | --- |
+| Android Gradle Plugin | 8.3.0 |
+| Gradle Wrapper | 8.4 |
+| Kotlin | 1.9.22 |
+| compileSdk / targetSdk | 34 / 34 |
+| Android NDK | 26.1.10909125 |
+| CMake | 3.22.1 |
+| Java для Gradle | 17 |
 
-To bypass some blocks, you may need to change the settings. More about the various settings can be found in the [ByeDPI documentation](https://github.com/hufrea/byedpi/blob/v0.13/README.md).
+Понадобятся Android SDK 34, Android NDK 26.1.10909125 и CMake 3.22.1. Клонировать репозиторий нужно вместе с подмодулями:
 
-## FAQ
+```powershell
+git clone --recurse-submodules https://github.com/lolososka/zapret-control-center-android.git
+cd zapret-control-center-android
+.\gradlew.bat lintDebug testDebugUnitTest assembleDebug
+```
 
-### I can't configure it. What to do?
+Debug APK появится в `app/build/outputs/apk/debug/`.
 
-You can ask for help in [discussion](https://github.com/dovecoteescapee/ByeDPIAndroid/discussions).
+Порядок подготовки публичной версии описан в [RELEASING.md](RELEASING.md). Он отделяет проверочные debug-сборки от подписанных выпусков.
 
-### Does the application require root access?
+## Происхождение проекта
 
-No. All application features work without root.
+Это самостоятельный форк [ByeDPIAndroid](https://github.com/dovecoteescapee/ByeDPIAndroid), который развивает **dovecoteescapee**. История Git сохранена, а удалённый репозиторий `upstream` используется для аккуратной синхронизации с оригиналом.
 
-### Is this a VPN?
+Основные компоненты:
 
-No. The application uses the VPN mode on Android to redirect traffic, but does not send anything to a remote server. It does not encrypt traffic and does not hide your IP address.
+- [ByeDPIAndroid](https://github.com/dovecoteescapee/ByeDPIAndroid) — исходная Android-реализация;
+- [ByeDPI](https://github.com/hufrea/byedpi) — локальный SOCKS5-прокси и DPI-десинхронизация;
+- [hev-socks5-tunnel](https://github.com/heiher/hev-socks5-tunnel) — туннель между Android VPN и SOCKS5.
 
-### How to use ByeDPI with AdGuard?
+Название Zapret Mobile относится к этому форку. Приложение не является официальным клиентом проектов ByeDPI, ByeDPIAndroid или `bol-van/zapret` и не содержит Windows-компоненты WinDivert.
 
-1. Run ByeDPI in proxy mode.
-2. Add ByeDPI to AdGuard exceptions on the "App management" tab.
-3. In AdGuard settings, specify the proxy:
+## Конфиденциальность
 
-   ```plaintext
-   Proxy type: SOCKS5
-   Proxy host: 127.0.0.1
-   Proxy port: 1080 (default)
-   ```
+В приложении нет учётной записи, аналитики и телеметрии проекта. Обычный сетевой трафик по-прежнему уходит к сайтам и сервисам, которые открывает пользователь. Перед установкой сторонней сборки сравните её источник и SHA-256 с официальным выпуском.
 
-### What data does the application collect?
+## Лицензия и благодарности
 
-None. The application does not send any data to a remote server. All traffic is processed on the device.
+Основной код приложения и изменения этого форка распространяются по [GNU General Public License v3](LICENSE). Авторские права исходных разработчиков сохранены. Список встроенных компонентов и их лицензий находится в [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-### Are there any for other platforms?
-
-[Similar projects](https://github.com/ValdikSS/GoodbyeDPI/blob/master/README.md#similar-projects))
-
-### What is DPI?
-
-DPI (Deep Packet Inspection) is a technology for analyzing and filtering traffic. It is used by providers and government agencies to block sites and services.
-
-## Dependencies
-
-- [ByeDPI](https://github.com/hufrea/byedpi)
-- [hev-socks5-tunnel](https://github.com/heiher/hev-socks5-tunnel)
-
-## Building
-
-For building the application, you need:
-
-1. JDK 8 or later
-2. Android SDK
-3. Android NDK
-4. CMake 3.22.1 or later
-
-To build the application:
-
-1. Clone the repository with submodules:
-   ```bash
-   git clone --recurse-submodules
-   ```
-2. Run the build script from the root of the repository:
-   ```bash
-   ./gradlew assembleRelease
-   ```
-3. The APK will be in `app/build/outputs/apk/release/`
+Ошибки и предложения принимаются в [Issues](https://github.com/lolososka/zapret-control-center-android/issues). О проблемах безопасности сообщайте по инструкции в [SECURITY.md](SECURITY.md).

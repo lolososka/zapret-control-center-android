@@ -28,9 +28,10 @@ class ByeDpiProxy {
             }
 
             val result = jniStopProxy(fd)
-            if (result == 0) {
-                fd = -1
-            }
+            // The native teardown resets its global state even when shutdown(2)
+            // reports that the socket was already closed. Never keep a stale fd,
+            // otherwise the next connection cannot start.
+            fd = -1
             return result
         }
     }

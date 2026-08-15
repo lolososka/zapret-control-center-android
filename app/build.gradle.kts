@@ -6,13 +6,16 @@ plugins {
 android {
     namespace = "io.github.dovecoteescapee.byedpi"
     compileSdk = 34
+    ndkVersion = "26.1.10909125"
 
     defaultConfig {
-        applicationId = "io.github.dovecoteescapee.byedpi"
+        // Keep the source namespace for the native JNI bridge, but publish the
+        // fork as an independent app that can coexist with ByeDPIAndroid.
+        applicationId = "io.github.lolososka.zapretmobile"
         minSdk = 21
         targetSdk = 34
-        versionCode = 10
-        versionName = "1.2.0"
+        versionCode = 1
+        versionName = "0.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

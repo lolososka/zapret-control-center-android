@@ -66,7 +66,7 @@ class QuickTileService : TileService() {
                 addAction(STOPPED_BROADCAST)
                 addAction(FAILED_BROADCAST)
             },
-            ContextCompat.RECEIVER_EXPORTED,
+            ContextCompat.RECEIVER_NOT_EXPORTED,
         )
     }
 

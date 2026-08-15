@@ -7,6 +7,7 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.util.Log
+import androidx.core.app.ServiceCompat
 import androidx.lifecycle.lifecycleScope
 import io.github.dovecoteescapee.byedpi.R
 import io.github.dovecoteescapee.byedpi.activities.MainActivity
@@ -27,8 +28,11 @@ class ByeDpiVpnService : LifecycleVpnService() {
     private val byeDpiProxy = ByeDpiProxy()
     private var proxyJob: Job? = null
     private var tunFd: ParcelFileDescriptor? = null
+    private var tunConfigFile: File? = null
     private val mutex = Mutex()
     private var stopping: Boolean = false
+    private var startCommandPending: Boolean = false
+    private var stopCommandPending: Boolean = false
 
     companion object {
         private val TAG: String = ByeDpiVpnService::class.java.simpleName
@@ -51,12 +55,37 @@ class ByeDpiVpnService : LifecycleVpnService() {
         super.onStartCommand(intent, flags, startId)
         return when (val action = intent?.action) {
             START_ACTION -> {
-                lifecycleScope.launch { start() }
+                // Android requires a service launched through startForegroundService()
+                // to become foreground promptly, before native startup work begins.
+                startForeground()
+                if (!startCommandPending && status != ServiceStatus.Connected) {
+                    startCommandPending = true
+                    lifecycleScope.launch {
+                        try {
+                            start()
+                        } finally {
+                            startCommandPending = false
+                        }
+                    }
+                }
                 START_STICKY
             }
 
             STOP_ACTION -> {
-                lifecycleScope.launch { stop() }
+                // STOP can also arrive through a foreground-service PendingIntent.
+                // Publishing the notification first keeps this path valid even if the
+                // process/service was recreated before handling the command.
+                startForeground()
+                if (!stopCommandPending) {
+                    stopCommandPending = true
+                    lifecycleScope.launch {
+                        try {
+                            stop()
+                        } finally {
+                            stopCommandPending = false
+                        }
+                    }
+                }
                 START_NOT_STICKY
             }
 
@@ -86,11 +115,9 @@ class ByeDpiVpnService : LifecycleVpnService() {
                 startTun2Socks()
             }
             updateStatus(ServiceStatus.Connected)
-            startForeground()
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start VPN", e)
-            updateStatus(ServiceStatus.Failed)
-            stop()
+            stop(ServiceStatus.Failed)
         }
     }
 
@@ -107,22 +134,29 @@ class ByeDpiVpnService : LifecycleVpnService() {
         }
     }
 
-    private suspend fun stop() {
+    private suspend fun stop(finalStatus: ServiceStatus = ServiceStatus.Disconnected) {
         Log.i(TAG, "Stopping")
 
         mutex.withLock {
             stopping = true
             try {
-                stopTun2Socks()
-                stopProxy()
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to stop VPN", e)
+                try {
+                    stopTun2Socks()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to stop tun2socks", e)
+                }
+                try {
+                    stopProxy()
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to stop proxy", e)
+                }
             } finally {
                 stopping = false
             }
         }
 
-        updateStatus(ServiceStatus.Disconnected)
+        updateStatus(finalStatus)
+        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 
@@ -140,14 +174,11 @@ class ByeDpiVpnService : LifecycleVpnService() {
             val code = byeDpiProxy.startProxy(preferences)
 
             withContext(Dispatchers.Main) {
-                if (code != 0) {
-                    Log.e(TAG, "Proxy stopped with code $code")
-                    updateStatus(ServiceStatus.Failed)
-                } else {
-                    if (!stopping) {
-                        stop()
-                        updateStatus(ServiceStatus.Disconnected)
-                    }
+                if (!stopping) {
+                    Log.e(TAG, "Proxy exited unexpectedly with code $code")
+                    // Run teardown in a different coroutine. Calling stop() from
+                    // proxyJob itself would make stopProxy() join the current job.
+                    lifecycleScope.launch { stop(ServiceStatus.Failed) }
                 }
             }
         }
@@ -158,14 +189,18 @@ class ByeDpiVpnService : LifecycleVpnService() {
     private suspend fun stopProxy() {
         Log.i(TAG, "Stopping proxy")
 
-        if (status == ServiceStatus.Disconnected) {
-            Log.w(TAG, "Proxy already disconnected")
+        val job = proxyJob
+        if (job == null) {
+            Log.w(TAG, "Proxy is not running")
             return
         }
 
-        byeDpiProxy.stopProxy()
-        proxyJob?.join() ?: throw IllegalStateException("ProxyJob field null")
-        proxyJob = null
+        try {
+            byeDpiProxy.stopProxy()
+        } finally {
+            job.join()
+            proxyJob = null
+        }
 
         Log.i(TAG, "Proxy stopped")
     }
@@ -200,6 +235,7 @@ class ByeDpiVpnService : LifecycleVpnService() {
             Log.e(TAG, "Failed to create config file", e)
             throw e
         }
+        tunConfigFile = configPath
 
         val fd = createBuilder(dns, ipv6).establish()
             ?: throw IllegalStateException("VPN connection failed")
@@ -214,16 +250,22 @@ class ByeDpiVpnService : LifecycleVpnService() {
     private fun stopTun2Socks() {
         Log.i(TAG, "Stopping tun2socks")
 
-        TProxyService.TProxyStopService()
-
-        try {
-            File(cacheDir, "config.tmp").delete()
-        } catch (e: SecurityException) {
-            Log.e(TAG, "Failed to delete config file", e)
+        val fd = tunFd
+        if (fd != null) {
+            TProxyService.TProxyStopService()
+            fd.close()
+            tunFd = null
+        } else {
+            Log.w(TAG, "VPN is not running")
         }
 
-        tunFd?.close() ?: Log.w(TAG, "VPN not running")
-        tunFd = null
+        try {
+            tunConfigFile?.delete()
+        } catch (e: SecurityException) {
+            Log.e(TAG, "Failed to delete config file", e)
+        } finally {
+            tunConfigFile = null
+        }
 
         Log.i(TAG, "Tun2socks stopped")
     }
@@ -257,7 +299,7 @@ class ByeDpiVpnService : LifecycleVpnService() {
             }
         )
         intent.putExtra(SENDER, Sender.VPN.ordinal)
-        sendBroadcast(intent)
+        sendBroadcast(intent.setPackage(packageName))
     }
 
     private fun createNotification(): Notification =
@@ -272,7 +314,7 @@ class ByeDpiVpnService : LifecycleVpnService() {
     private fun createBuilder(dns: String, ipv6: Boolean): Builder {
         Log.d(TAG, "DNS: $dns")
         val builder = Builder()
-        builder.setSession("ByeDPI")
+        builder.setSession(getString(R.string.app_name))
         builder.setConfigureIntent(
             PendingIntent.getActivity(
                 this,

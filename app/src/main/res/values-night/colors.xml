@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="zapret_mist">#080B10</color>
+    <color name="zapret_porcelain">#111720</color>
+    <color name="zapret_ink">#F3F5F8</color>
+    <color name="zapret_muted">#9AA3B1</color>
+    <color name="zapret_line">#252D38</color>
+    <color name="zapret_violet">#8274FF</color>
+    <color name="zapret_violet_dark">#6653F3</color>
+    <color name="zapret_violet_soft">#AA9FFF</color>
+</resources>

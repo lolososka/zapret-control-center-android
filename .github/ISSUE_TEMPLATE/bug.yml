@@ -1,13 +1,13 @@
 name: Bug Report / Сообщение об ошибке
 description: File a bug report / Сообщить об ошибке в программе
 labels: [ bug ]
-assignees: dovecoteescapee
+assignees: lolososka
 body:
   - type: markdown
     attributes:
       value: |
-        ### If you have trouble with specific websites or or can't configure the app, please use the [discussions section](https://github.com/dovecoteescapee/ByeDPIAndroid/discussions) to discuss it. This template is only for reporting bugs in the ByeDPI program.
-        ### Если у вас не работают какие-то сайты или не получается настроить приложение, используйте [раздел дискуссий](https://github.com/dovecoteescapee/ByeDPIAndroid/discussions) для обсуждения этого. Этот шаблон предназначен только для сообщений об ошибках в программе ByeDPI.
+        ### If you have trouble with specific websites or can't configure the app, please use the [discussions section](https://github.com/lolososka/zapret-control-center-android/discussions). This template is only for reproducible application bugs.
+        ### Если не работают отдельные сайты или не получается подобрать настройки, используйте [раздел обсуждений](https://github.com/lolososka/zapret-control-center-android/discussions). Этот шаблон предназначен только для воспроизводимых ошибок приложения.
   - type: textarea
     id: bug
     attributes:
