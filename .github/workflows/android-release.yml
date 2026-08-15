@@ -142,7 +142,7 @@ jobs:
             --key-pass env:KEY_PASSWORD \
             --out "$signed_apk" \
             "$aligned_apk"
-          "$build_tools/zipalign" -c -P 16 -v 4 "$signed_apk"
+          "$build_tools/zipalign" -c -p -v 4 "$signed_apk"
           "$build_tools/apksigner" verify --verbose --print-certs "$signed_apk"
 
           (

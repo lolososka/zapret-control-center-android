@@ -68,7 +68,7 @@ class ByeDpiVpnService : LifecycleVpnService() {
                         }
                     }
                 }
-                START_STICKY
+                START_NOT_STICKY
             }
 
             STOP_ACTION -> {
