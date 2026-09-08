@@ -4,7 +4,7 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <path android:fillColor="#111720" android:pathData="M0,0 L108,0 L108,108 L0,108 Z" />
-    <path android:fillColor="#8274FF" android:pathData="M24,12 L84,12 Q96,12 96,24 L96,84 Q96,96 84,96 L24,96 Q12,96 12,84 L12,24 Q12,12 24,12 Z" />
-    <path android:fillColor="#FFFFFFFF" android:pathData="M28,31 L80,31 L80,41 L43,67 L80,67 L80,77 L28,77 L28,67 L65,41 L28,41 Z" />
+    <path android:fillColor="@color/zapret_instrument" android:pathData="M0,0 L108,0 L108,108 L0,108 Z" />
+    <path android:fillColor="@color/zapret_mark_violet" android:pathData="M33.12,18 H74.88 Q90,18 90,33.12 V74.88 Q90,90 74.88,90 H33.12 Q18,90 18,74.88 V33.12 Q18,18 33.12,18 Z" />
+    <path android:fillColor="@color/zapret_mark_ink" android:pathData="M41.328,39.384 L66.96,39.384 L50.904,61.056 L66.96,61.056 L66.96,68.616 L41.328,68.616 L57.384,46.944 L41.328,46.944 Z" />
 </vector>

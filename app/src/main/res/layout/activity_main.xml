@@ -141,7 +141,7 @@
                     android:contentDescription="@string/route_dial_description"
                     android:clickable="true"
                     android:focusable="true"
-                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:background="@drawable/bg_dial_press"
                     android:importantForAccessibility="yes" />
 
                 <TextView

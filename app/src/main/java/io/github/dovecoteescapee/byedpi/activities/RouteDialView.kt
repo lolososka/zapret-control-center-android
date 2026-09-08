@@ -1,5 +1,7 @@
 package io.github.dovecoteescapee.byedpi.activities
 
+import android.animation.Animator
+import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Canvas
@@ -10,7 +12,9 @@ import android.os.Build
 import android.util.AttributeSet
 import android.view.View
 import android.view.animation.LinearInterpolator
+import android.view.animation.PathInterpolator
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.ColorUtils
 import io.github.dovecoteescapee.byedpi.R
 import kotlin.math.cos
 import kotlin.math.min
@@ -45,10 +49,13 @@ class RouteDialView @JvmOverloads constructor(
     private var progress = 0f
     private var running = false
     private var animator: ValueAnimator? = null
+    private var stateAnimator: ValueAnimator? = null
+    private var activeAmount = 0f
 
     fun setRunning(value: Boolean) {
         if (running == value) return
         running = value
+        animateRunningState(if (value) 1f else 0f)
         if (value) startAnimationIfAllowed() else stopAnimation()
         invalidate()
     }
@@ -59,7 +66,9 @@ class RouteDialView @JvmOverloads constructor(
     }
 
     override fun onDetachedFromWindow() {
-        stopAnimation(reset = false)
+        stopAnimation()
+        stateAnimator?.cancel()
+        stateAnimator = null
         super.onDetachedFromWindow()
     }
 
@@ -70,19 +79,19 @@ class RouteDialView @JvmOverloads constructor(
         val centerX = width / 2f
         val centerY = height / 2f
         val radius = size * 0.39f
-        val angleOffset = if (running) progress * 360f else -22f
+        val angleOffset = progress * 360f - 22f
 
-        drawTicks(canvas, centerX, centerY, radius, angleOffset)
-        drawRoute(canvas, centerX, centerY, radius, angleOffset)
-        drawCenterMark(canvas, centerX, centerY, size)
+        drawTicks(canvas, centerX, centerY, radius)
+        drawRoute(canvas, centerX, centerY, radius, angleOffset, activeAmount)
+        drawCenterMark(canvas, centerX, centerY, size, activeAmount)
     }
 
-    private fun drawTicks(canvas: Canvas, cx: Float, cy: Float, radius: Float, offset: Float) {
+    private fun drawTicks(canvas: Canvas, cx: Float, cy: Float, radius: Float) {
         linePaint.shader = null
         linePaint.strokeWidth = dp(1f)
 
         repeat(48) { index ->
-            val angle = Math.toRadians((index * 7.5f + offset * 0.08f - 90f).toDouble())
+            val angle = Math.toRadians((index * 7.5f - 90f).toDouble())
             val major = index % 4 == 0
             val startRadius = radius + if (major) dp(9f) else dp(12f)
             val endRadius = radius + dp(17f)
@@ -98,11 +107,18 @@ class RouteDialView @JvmOverloads constructor(
         }
     }
 
-    private fun drawRoute(canvas: Canvas, cx: Float, cy: Float, radius: Float, offset: Float) {
+    private fun drawRoute(
+        canvas: Canvas,
+        cx: Float,
+        cy: Float,
+        radius: Float,
+        offset: Float,
+        activity: Float,
+    ) {
         val ring = RectF(cx - radius, cy - radius, cx + radius, cy + radius)
         linePaint.strokeWidth = dp(2.2f)
         linePaint.color = quietStrong
-        linePaint.alpha = 145
+        linePaint.alpha = (130f + 25f * activity).toInt()
         linePaint.shader = null
         canvas.drawArc(ring, -65f, 288f, false, linePaint)
 
@@ -113,7 +129,7 @@ class RouteDialView @JvmOverloads constructor(
             ring.bottom - dp(6f),
         )
         linePaint.strokeWidth = dp(3f)
-        linePaint.alpha = 255
+        linePaint.alpha = (100f + 155f * activity).toInt()
         linePaint.shader = SweepGradient(
             cx,
             cy,
@@ -129,10 +145,11 @@ class RouteDialView @JvmOverloads constructor(
         canvas.restore()
         linePaint.shader = null
 
-        if (running) {
-            drawPacket(canvas, cx, cy, radius - dp(6f), offset - 72f, blue, 3.5f)
-            drawPacket(canvas, cx, cy, radius - dp(6f), offset + 100f, rose, 2.5f)
-            drawPacket(canvas, cx, cy, radius - dp(6f), offset + 237f, violetSoft, 3f)
+        if (activity > 0.02f) {
+            val packetAlpha = (255f * activity).toInt()
+            drawPacket(canvas, cx, cy, radius - dp(6f), offset - 72f, blue, 3.5f, packetAlpha)
+            drawPacket(canvas, cx, cy, radius - dp(6f), offset + 100f, rose, 2.5f, packetAlpha)
+            drawPacket(canvas, cx, cy, radius - dp(6f), offset + 237f, violetSoft, 3f, packetAlpha)
         }
     }
 
@@ -144,10 +161,11 @@ class RouteDialView @JvmOverloads constructor(
         angleDegrees: Float,
         color: Int,
         sizeDp: Float,
+        alpha: Int,
     ) {
         val angle = Math.toRadians(angleDegrees.toDouble())
         fillPaint.color = color
-        fillPaint.alpha = 255
+        fillPaint.alpha = alpha
         canvas.drawCircle(
             cx + cos(angle).toFloat() * radius,
             cy + sin(angle).toFloat() * radius,
@@ -156,13 +174,19 @@ class RouteDialView @JvmOverloads constructor(
         )
     }
 
-    private fun drawCenterMark(canvas: Canvas, cx: Float, cy: Float, size: Float) {
+    private fun drawCenterMark(
+        canvas: Canvas,
+        cx: Float,
+        cy: Float,
+        size: Float,
+        activity: Float,
+    ) {
         linePaint.shader = null
         linePaint.style = Paint.Style.STROKE
         linePaint.strokeWidth = dp(2.4f)
         linePaint.strokeCap = Paint.Cap.ROUND
-        linePaint.color = if (running) violetSoft else quietStrong
-        linePaint.alpha = if (running) 255 else 220
+        linePaint.color = ColorUtils.blendARGB(quietStrong, violetSoft, activity)
+        linePaint.alpha = (220f + 35f * activity).toInt()
 
         val radius = size * 0.085f
         val arc = RectF(cx - radius, cy - radius, cx + radius, cy + radius)
@@ -174,7 +198,7 @@ class RouteDialView @JvmOverloads constructor(
     private fun startAnimationIfAllowed() {
         if (!isAttachedToWindow || animator != null || !animationsEnabled()) return
         animator = ValueAnimator.ofFloat(progress, progress + 1f).apply {
-            duration = 8_000L
+            duration = 20_000L
             repeatCount = ValueAnimator.INFINITE
             interpolator = LinearInterpolator()
             addUpdateListener {
@@ -185,10 +209,36 @@ class RouteDialView @JvmOverloads constructor(
         }
     }
 
-    private fun stopAnimation(reset: Boolean = true) {
+    private fun stopAnimation() {
         animator?.cancel()
         animator = null
-        if (reset) progress = 0f
+    }
+
+    private fun animateRunningState(target: Float) {
+        stateAnimator?.cancel()
+        stateAnimator = null
+
+        if (!animationsEnabled() || activeAmount == target) {
+            activeAmount = target
+            invalidate()
+            return
+        }
+
+        val transition = ValueAnimator.ofFloat(activeAmount, target).apply {
+            duration = if (target > activeAmount) 420L else 300L
+            interpolator = PathInterpolator(0.2f, 0f, 0f, 1f)
+            addUpdateListener {
+                activeAmount = it.animatedValue as Float
+                invalidate()
+            }
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    if (stateAnimator === animation) stateAnimator = null
+                }
+            })
+        }
+        stateAnimator = transition
+        transition.start()
     }
 
     private fun animationsEnabled(): Boolean =

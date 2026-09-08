@@ -1,6 +1,7 @@
 package io.github.dovecoteescapee.byedpi.activities
 
 import android.Manifest
+import android.animation.ValueAnimator
 import android.content.BroadcastReceiver
 import android.content.res.ColorStateList
 import android.content.Context
@@ -15,6 +16,8 @@ import android.os.SystemClock
 import android.util.Log
 import android.view.Menu
 import android.view.MenuItem
+import android.view.View
+import android.view.animation.PathInterpolator
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -48,6 +51,11 @@ class MainActivity : AppCompatActivity() {
     private var txBaseline = 0L
     @Volatile private var lastPingMs: Long? = null
     private var pendingMode: Mode? = null
+    private var lastVisualStatus: AppStatus? = null
+    private var lastVisualMode: Mode? = null
+
+    private val pressInInterpolator = PathInterpolator(0.2f, 0f, 0f, 1f)
+    private val pressOutInterpolator = PathInterpolator(0.16f, 1f, 0.3f, 1f)
 
     companion object {
         private val TAG: String = MainActivity::class.java.simpleName
@@ -178,18 +186,10 @@ class MainActivity : AppCompatActivity() {
         binding.routeDial.setOnClickListener { toggleConnection() }
         binding.routeDial.setOnTouchListener { view, event ->
             when (event.actionMasked) {
-                android.view.MotionEvent.ACTION_DOWN -> view.animate()
-                    .scaleX(0.95f)
-                    .scaleY(0.95f)
-                    .setDuration(120L)
-                    .start()
+                android.view.MotionEvent.ACTION_DOWN -> animateDialPress(view, pressed = true)
 
                 android.view.MotionEvent.ACTION_UP,
-                android.view.MotionEvent.ACTION_CANCEL -> view.animate()
-                    .scaleX(1f)
-                    .scaleY(1f)
-                    .setDuration(180L)
-                    .start()
+                android.view.MotionEvent.ACTION_CANCEL -> animateDialPress(view, pressed = false)
             }
             false
         }
@@ -313,11 +313,12 @@ class MainActivity : AppCompatActivity() {
         Log.i(TAG, "Updating status: $status, $mode")
 
         val preferences = getPreferences()
+        val selectedMode = preferences.mode()
         val proxyIp = preferences.getStringNotNull("byedpi_proxy_ip", "127.0.0.1")
         val proxyPort = preferences.getStringNotNull("byedpi_proxy_port", "1080")
         binding.proxyAddress.text = getString(R.string.proxy_address, proxyIp, proxyPort)
         binding.modeValue.setText(
-            when (preferences.mode()) {
+            when (selectedMode) {
                 Mode.VPN -> R.string.mode_vpn_value
                 Mode.Proxy -> R.string.mode_proxy_value
             }
@@ -336,7 +337,7 @@ class MainActivity : AppCompatActivity() {
                 binding.statusDot.backgroundTintList = ColorStateList.valueOf(
                     ContextCompat.getColor(this, R.color.dial_quiet_strong)
                 )
-                when (preferences.mode()) {
+                when (selectedMode) {
                     Mode.VPN -> {
                         binding.statusText.setText(R.string.vpn_disconnected)
                         binding.statusButton.setText(R.string.vpn_connect)
@@ -373,6 +374,75 @@ class MainActivity : AppCompatActivity() {
                 startMetricsLoop()
             }
         }
+
+        val stateChanged = lastVisualStatus != null &&
+            (lastVisualStatus != status || lastVisualMode != selectedMode)
+        lastVisualStatus = status
+        lastVisualMode = selectedMode
+        if (stateChanged) animateConnectionState()
+    }
+
+    private fun animateDialPress(view: View, pressed: Boolean) {
+        view.animate().cancel()
+        if (!uiAnimationsEnabled()) {
+            view.scaleX = if (pressed) 0.97f else 1f
+            view.scaleY = if (pressed) 0.97f else 1f
+            view.alpha = if (pressed) 0.94f else 1f
+            return
+        }
+
+        view.animate()
+            .scaleX(if (pressed) 0.97f else 1f)
+            .scaleY(if (pressed) 0.97f else 1f)
+            .alpha(if (pressed) 0.94f else 1f)
+            .setDuration(if (pressed) 150L else 240L)
+            .setInterpolator(if (pressed) pressInInterpolator else pressOutInterpolator)
+            .start()
+    }
+
+    private fun animateConnectionState() {
+        val views = listOf(
+            binding.statusText,
+            binding.statusDetail,
+            binding.modeValue,
+            binding.strategyBadge,
+        )
+
+        if (!uiAnimationsEnabled()) {
+            views.forEach {
+                it.alpha = 1f
+                it.translationY = 0f
+            }
+            binding.statusDot.alpha = 1f
+            binding.statusDot.scaleX = 1f
+            binding.statusDot.scaleY = 1f
+            return
+        }
+
+        views.forEachIndexed { index, view ->
+            view.animate().cancel()
+            view.alpha = 0f
+            view.translationY = dp(6f)
+            view.animate()
+                .alpha(1f)
+                .translationY(0f)
+                .setStartDelay(index * 24L)
+                .setDuration(280L)
+                .setInterpolator(pressInInterpolator)
+                .start()
+        }
+
+        binding.statusDot.animate().cancel()
+        binding.statusDot.alpha = 0.4f
+        binding.statusDot.scaleX = 0.72f
+        binding.statusDot.scaleY = 0.72f
+        binding.statusDot.animate()
+            .alpha(1f)
+            .scaleX(1f)
+            .scaleY(1f)
+            .setDuration(260L)
+            .setInterpolator(pressInInterpolator)
+            .start()
     }
 
     private fun startMetricsLoop() {
@@ -450,6 +520,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun supportedBytes(value: Long): Long =
         if (value == TrafficStats.UNSUPPORTED.toLong() || value < 0L) 0L else value
+
+    private fun uiAnimationsEnabled(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.O || ValueAnimator.areAnimatorsEnabled()
+
+    private fun dp(value: Float): Float = value * resources.displayMetrics.density
 
     private fun formatBytes(value: Long): String = when {
         value < 1_024L -> "$value Б"
