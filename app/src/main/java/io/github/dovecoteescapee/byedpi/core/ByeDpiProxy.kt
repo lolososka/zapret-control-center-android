@@ -1,8 +1,5 @@
 package io.github.dovecoteescapee.byedpi.core
 
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-
 class ByeDpiProxy {
     companion object {
         init {
@@ -10,45 +7,19 @@ class ByeDpiProxy {
         }
     }
 
-    private val mutex = Mutex()
-    private var fd = -1
-
-    suspend fun startProxy(preferences: ByeDpiProxyPreferences): Int {
-        val fd = createSocket(preferences)
-        if (fd < 0) {
-            return -1 // TODO: should be error code
-        }
-        return jniStartProxy(fd)
+    // A session is a generation handle, never a raw file descriptor. Capturing it
+    // before launching the worker makes an immediate Stop safe even if the worker
+    // has not started, or the OS has already reused a closed listener descriptor.
+    class Session internal constructor(private val owner: ByeDpiProxy, private val handle: Int) {
+        fun run(): Int = owner.jniStartProxy(handle)
+        fun stop(): Int = owner.jniStopProxy(handle)
     }
 
-    suspend fun stopProxy(): Int {
-        mutex.withLock {
-            if (fd < 0) {
-                throw IllegalStateException("Proxy is not running")
-            }
-
-            val result = jniStopProxy(fd)
-            // The native teardown resets its global state even when shutdown(2)
-            // reports that the socket was already closed. Never keep a stale fd,
-            // otherwise the next connection cannot start.
-            fd = -1
-            return result
-        }
+    fun prepareProxy(preferences: ByeDpiProxyPreferences): Session {
+        val handle = createSocketFromPreferences(preferences)
+        check(handle >= 0) { "Failed to create proxy socket" }
+        return Session(this, handle)
     }
-
-    private suspend fun createSocket(preferences: ByeDpiProxyPreferences): Int =
-        mutex.withLock {
-            if (fd >= 0) {
-                throw IllegalStateException("Proxy is already running")
-            }
-
-            val fd = createSocketFromPreferences(preferences)
-            if (fd < 0) {
-                return -1
-            }
-            this.fd = fd
-            fd
-        }
 
     private fun createSocketFromPreferences(preferences: ByeDpiProxyPreferences) =
         when (preferences) {
@@ -119,7 +90,7 @@ class ByeDpiProxy {
         fakeOffset: Int,
     ): Int
 
-    private external fun jniStartProxy(fd: Int): Int
+    private external fun jniStartProxy(handle: Int): Int
 
-    private external fun jniStopProxy(fd: Int): Int
+    private external fun jniStopProxy(handle: Int): Int
 }

@@ -7,14 +7,16 @@ import android.os.Build
 import android.util.Log
 import androidx.core.app.ServiceCompat
 import androidx.lifecycle.LifecycleService
-import androidx.lifecycle.lifecycleScope
 import io.github.dovecoteescapee.byedpi.R
 import io.github.dovecoteescapee.byedpi.core.ByeDpiProxy
 import io.github.dovecoteescapee.byedpi.core.ByeDpiProxyPreferences
 import io.github.dovecoteescapee.byedpi.data.*
 import io.github.dovecoteescapee.byedpi.utility.*
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -23,6 +25,9 @@ import kotlinx.coroutines.withContext
 class ByeDpiProxyService : LifecycleService() {
     private var proxy = ByeDpiProxy()
     private var proxyJob: Job? = null
+    private var proxySession: ByeDpiProxy.Session? = null
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var destroyed = false
     private val mutex = Mutex()
     private var stopping: Boolean = false
     private var startCommandPending: Boolean = false
@@ -54,7 +59,7 @@ class ByeDpiProxyService : LifecycleService() {
                 startForeground()
                 if (!startCommandPending && status != ServiceStatus.Connected) {
                     startCommandPending = true
-                    lifecycleScope.launch {
+                    serviceScope.launch {
                         try {
                             start()
                         } finally {
@@ -69,7 +74,7 @@ class ByeDpiProxyService : LifecycleService() {
                 startForeground()
                 if (!stopCommandPending) {
                     stopCommandPending = true
-                    lifecycleScope.launch {
+                    serviceScope.launch {
                         try {
                             stop()
                         } finally {
@@ -87,19 +92,29 @@ class ByeDpiProxyService : LifecycleService() {
         }
     }
 
+    override fun onDestroy() {
+        destroyed = true
+        // LifecycleService cancels lifecycleScope at destruction. Keep teardown
+        // alive until the blocking native worker has released its resources.
+        serviceScope.launch {
+            try {
+                stop(if (status == ServiceStatus.Failed) status else ServiceStatus.Disconnected)
+            } finally {
+                serviceScope.cancel()
+            }
+        }
+        super.onDestroy()
+    }
+
     private suspend fun start() {
         Log.i(TAG, "Starting")
 
-        if (status == ServiceStatus.Connected) {
-            Log.w(TAG, "Proxy already connected")
-            return
-        }
-
         try {
             mutex.withLock {
+                if (destroyed || status == ServiceStatus.Connected) return
                 startProxy()
+                updateStatus(ServiceStatus.Connected)
             }
-            updateStatus(ServiceStatus.Connected)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start proxy", e)
             stop(ServiceStatus.Failed)
@@ -119,10 +134,14 @@ class ByeDpiProxyService : LifecycleService() {
         }
     }
 
-    private suspend fun stop(finalStatus: ServiceStatus = ServiceStatus.Disconnected) {
+    private suspend fun stop(
+        finalStatus: ServiceStatus = ServiceStatus.Disconnected,
+        expectedSession: ByeDpiProxy.Session? = null,
+    ) {
         Log.i(TAG, "Stopping proxy service")
 
         mutex.withLock {
+            if (expectedSession != null && proxySession !== expectedSession) return
             stopping = true
             try {
                 stopProxy()
@@ -131,10 +150,10 @@ class ByeDpiProxyService : LifecycleService() {
             } finally {
                 stopping = false
             }
+            updateStatus(finalStatus)
+            ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+            if (!destroyed) stopSelf()
         }
-        updateStatus(finalStatus)
-        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
-        stopSelf()
     }
 
     private suspend fun startProxy() {
@@ -147,14 +166,23 @@ class ByeDpiProxyService : LifecycleService() {
 
         proxy = ByeDpiProxy()
         val preferences = getByeDpiPreferences()
+        val session = withContext(Dispatchers.IO) {
+            proxy.prepareProxy(preferences)
+        }
+        proxySession = session
 
-        proxyJob = lifecycleScope.launch(Dispatchers.IO) {
-            val code = proxy.startProxy(preferences)
+        proxyJob = serviceScope.launch(Dispatchers.IO) {
+            val code = try {
+                session.run()
+            } catch (e: Exception) {
+                Log.e(TAG, "Native proxy loop failed", e)
+                -1
+            }
 
             withContext(Dispatchers.Main) {
-                if (!stopping) {
+                if (!stopping && !destroyed && proxySession === session) {
                     Log.e(TAG, "Proxy exited unexpectedly with code $code")
-                    lifecycleScope.launch { stop(ServiceStatus.Failed) }
+                    serviceScope.launch { stop(ServiceStatus.Failed, session) }
                 }
             }
         }
@@ -166,16 +194,12 @@ class ByeDpiProxyService : LifecycleService() {
         Log.i(TAG, "Stopping proxy")
 
         val job = proxyJob
-        if (job == null) {
-            Log.w(TAG, "Proxy is not running")
-            return
-        }
-
         try {
-            proxy.stopProxy()
+            proxySession?.stop()
         } finally {
-            job.join()
+            job?.join()
             proxyJob = null
+            proxySession = null
         }
 
         Log.i(TAG, "Proxy stopped")
@@ -193,10 +217,7 @@ class ByeDpiProxyService : LifecycleService() {
             when (newStatus) {
                 ServiceStatus.Connected -> AppStatus.Running
                 ServiceStatus.Disconnected,
-                ServiceStatus.Failed -> {
-                    proxyJob = null
-                    AppStatus.Halted
-                }
+                ServiceStatus.Failed -> AppStatus.Halted
             },
             Mode.Proxy
         )

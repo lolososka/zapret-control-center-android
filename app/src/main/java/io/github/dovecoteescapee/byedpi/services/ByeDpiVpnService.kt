@@ -8,7 +8,6 @@ import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.util.Log
 import androidx.core.app.ServiceCompat
-import androidx.lifecycle.lifecycleScope
 import io.github.dovecoteescapee.byedpi.R
 import io.github.dovecoteescapee.byedpi.activities.MainActivity
 import io.github.dovecoteescapee.byedpi.core.ByeDpiProxy
@@ -17,7 +16,10 @@ import io.github.dovecoteescapee.byedpi.core.TProxyService
 import io.github.dovecoteescapee.byedpi.data.*
 import io.github.dovecoteescapee.byedpi.utility.*
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -27,6 +29,9 @@ import java.io.File
 class ByeDpiVpnService : LifecycleVpnService() {
     private val byeDpiProxy = ByeDpiProxy()
     private var proxyJob: Job? = null
+    private var proxySession: ByeDpiProxy.Session? = null
+    private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var destroyed = false
     private var tunFd: ParcelFileDescriptor? = null
     private var tunConfigFile: File? = null
     private val mutex = Mutex()
@@ -60,7 +65,7 @@ class ByeDpiVpnService : LifecycleVpnService() {
                 startForeground()
                 if (!startCommandPending && status != ServiceStatus.Connected) {
                     startCommandPending = true
-                    lifecycleScope.launch {
+                    serviceScope.launch {
                         try {
                             start()
                         } finally {
@@ -78,7 +83,7 @@ class ByeDpiVpnService : LifecycleVpnService() {
                 startForeground()
                 if (!stopCommandPending) {
                     stopCommandPending = true
-                    lifecycleScope.launch {
+                    serviceScope.launch {
                         try {
                             stop()
                         } finally {
@@ -98,23 +103,31 @@ class ByeDpiVpnService : LifecycleVpnService() {
 
     override fun onRevoke() {
         Log.i(TAG, "VPN revoked")
-        lifecycleScope.launch { stop() }
+        serviceScope.launch { stop() }
+    }
+
+    override fun onDestroy() {
+        destroyed = true
+        serviceScope.launch {
+            try {
+                stop(if (status == ServiceStatus.Failed) status else ServiceStatus.Disconnected)
+            } finally {
+                serviceScope.cancel()
+            }
+        }
+        super.onDestroy()
     }
 
     private suspend fun start() {
         Log.i(TAG, "Starting")
 
-        if (status == ServiceStatus.Connected) {
-            Log.w(TAG, "VPN already connected")
-            return
-        }
-
         try {
             mutex.withLock {
+                if (destroyed || status == ServiceStatus.Connected) return
                 startProxy()
                 startTun2Socks()
+                updateStatus(ServiceStatus.Connected)
             }
-            updateStatus(ServiceStatus.Connected)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start VPN", e)
             stop(ServiceStatus.Failed)
@@ -134,10 +147,14 @@ class ByeDpiVpnService : LifecycleVpnService() {
         }
     }
 
-    private suspend fun stop(finalStatus: ServiceStatus = ServiceStatus.Disconnected) {
+    private suspend fun stop(
+        finalStatus: ServiceStatus = ServiceStatus.Disconnected,
+        expectedSession: ByeDpiProxy.Session? = null,
+    ) {
         Log.i(TAG, "Stopping")
 
         mutex.withLock {
+            if (expectedSession != null && proxySession !== expectedSession) return
             stopping = true
             try {
                 try {
@@ -153,11 +170,10 @@ class ByeDpiVpnService : LifecycleVpnService() {
             } finally {
                 stopping = false
             }
+            updateStatus(finalStatus)
+            ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+            if (!destroyed) stopSelf()
         }
-
-        updateStatus(finalStatus)
-        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
-        stopSelf()
     }
 
     private suspend fun startProxy() {
@@ -169,16 +185,25 @@ class ByeDpiVpnService : LifecycleVpnService() {
         }
 
         val preferences = getByeDpiPreferences()
+        val session = withContext(Dispatchers.IO) {
+            byeDpiProxy.prepareProxy(preferences)
+        }
+        proxySession = session
 
-        proxyJob = lifecycleScope.launch(Dispatchers.IO) {
-            val code = byeDpiProxy.startProxy(preferences)
+        proxyJob = serviceScope.launch(Dispatchers.IO) {
+            val code = try {
+                session.run()
+            } catch (e: Exception) {
+                Log.e(TAG, "Native proxy loop failed", e)
+                -1
+            }
 
             withContext(Dispatchers.Main) {
-                if (!stopping) {
+                if (!stopping && !destroyed && proxySession === session) {
                     Log.e(TAG, "Proxy exited unexpectedly with code $code")
                     // Run teardown in a different coroutine. Calling stop() from
                     // proxyJob itself would make stopProxy() join the current job.
-                    lifecycleScope.launch { stop(ServiceStatus.Failed) }
+                    serviceScope.launch { stop(ServiceStatus.Failed, session) }
                 }
             }
         }
@@ -190,16 +215,12 @@ class ByeDpiVpnService : LifecycleVpnService() {
         Log.i(TAG, "Stopping proxy")
 
         val job = proxyJob
-        if (job == null) {
-            Log.w(TAG, "Proxy is not running")
-            return
-        }
-
         try {
-            byeDpiProxy.stopProxy()
+            proxySession?.stop()
         } finally {
-            job.join()
+            job?.join()
             proxyJob = null
+            proxySession = null
         }
 
         Log.i(TAG, "Proxy stopped")
@@ -301,10 +322,7 @@ class ByeDpiVpnService : LifecycleVpnService() {
                 ServiceStatus.Connected -> AppStatus.Running
 
                 ServiceStatus.Disconnected,
-                ServiceStatus.Failed -> {
-                    proxyJob = null
-                    AppStatus.Halted
-                }
+                ServiceStatus.Failed -> AppStatus.Halted
             },
             Mode.VPN
         )

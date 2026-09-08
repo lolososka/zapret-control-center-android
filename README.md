@@ -5,7 +5,7 @@
 
 Android-приложение от **lolososka** в стиле Zapret Control Center. Оно запускает локальный VPN-интерфейс Android и направляет трафик через локальный SOCKS5-прокси [ByeDPI](https://github.com/hufrea/byedpi). Root-права не нужны.
 
-> Проект готовится к первому самостоятельному выпуску. Пока APK не появился в разделе Releases, опубликованной стабильной версии нет. Debug APK из GitHub Actions предназначен только для проверки разработки.
+> 0.1.0 — первый тестовый выпуск. Подписанный APK публикуется в Releases после автоматических проверок. Работа обхода на конкретном телефоне и у конкретного провайдера требует проверки.
 
 ## Что важно знать
 
@@ -18,9 +18,9 @@ Android-приложение от **lolososka** в стиле Zapret Control Cen
 
 ## Установка
 
-Готовые стабильные сборки будут публиковаться только в [GitHub Releases](https://github.com/lolososka/zapret-control-center-android/releases) и на [сайте Zapret Control Center](https://lolososka.github.io/zapret-discord-youtube/).
+Подписанные APK публикуются в [GitHub Releases](https://github.com/lolososka/zapret-control-center-android/releases) и на [сайте Zapret Control Center](https://lolososka.github.io/zapret-discord-youtube/#android). Скачайте APK на телефон, разрешите установку из выбранного браузера, откройте приложение и подтвердите системный запрос VPN при первом подключении.
 
-Перед установкой проверяйте, что адрес страницы начинается с `github.com/lolososka/` или `lolososka.github.io/`. Контрольная сумма SHA-256 будет приложена к каждому выпуску.
+Контрольная сумма SHA-256 и архив исходного кода с подмодулями приложены к каждому выпуску. Debug APK из Actions предназначен для разработки и подписан другим ключом.
 
 ## Сборка из исходников
 
