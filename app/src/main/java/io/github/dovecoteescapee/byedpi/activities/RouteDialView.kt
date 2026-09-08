@@ -69,7 +69,22 @@ class RouteDialView @JvmOverloads constructor(
         stopAnimation()
         stateAnimator?.cancel()
         stateAnimator = null
+        activeAmount = if (running) 1f else 0f
         super.onDetachedFromWindow()
+    }
+
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(visibility)
+        if (visibility == VISIBLE) {
+            activeAmount = if (running) 1f else 0f
+            if (running) startAnimationIfAllowed()
+        } else {
+            stopAnimation()
+            stateAnimator?.cancel()
+            stateAnimator = null
+            activeAmount = if (running) 1f else 0f
+        }
+        invalidate()
     }
 
     override fun onDraw(canvas: Canvas) {
