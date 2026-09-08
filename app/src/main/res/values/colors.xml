@@ -12,6 +12,9 @@
     <color name="zapret_violet">#8274FF</color>
     <color name="zapret_violet_dark">#6653F3</color>
     <color name="zapret_violet_soft">#AA9FFF</color>
+    <!-- Brand mark shared with the Windows app icon. -->
+    <color name="zapret_mark_violet">#8B57FF</color>
+    <color name="zapret_mark_ink">#0B0D12</color>
     <color name="zapret_blue">#3E7BFA</color>
     <color name="zapret_rose">#ED5B86</color>
     <color name="zapret_mint">#91E6C4</color>
