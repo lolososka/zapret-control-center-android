@@ -49,6 +49,11 @@ jobs:
             exit 1
           fi
 
+          # actions/checkout may leave an annotated tag peeled to its commit in
+          # the local ref namespace. Fetch the exact tag ref again so the
+          # annotation check observes the server-side tag object.
+          git fetch --force --no-tags origin \
+            "+refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
           if [[ "$(git cat-file -t "refs/tags/$GITHUB_REF_NAME")" != "tag" ]]; then
             echo "::error::Release tag must be annotated, not lightweight."
             exit 1
