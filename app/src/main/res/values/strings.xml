@@ -13,8 +13,8 @@
     <string name="proxy_start">Запустить прокси</string>
     <string name="proxy_stop">Остановить</string>
     <string name="settings">Настройки</string>
-    <string name="vpn_permission_denied">Без разрешения VPN подключение не запустится</string>
-    <string name="settings_unavailable">Сначала выключите Zapret, затем измените настройки</string>
+    <string name="vpn_permission_denied">Разрешение VPN не выдано</string>
+    <string name="settings_unavailable">Сначала выключите Zapret</string>
     <string name="title_settings">Настройки</string>
     <string name="save_logs">Сохранить журнал</string>
     <string name="reset_settings">Сбросить</string>
@@ -23,8 +23,8 @@
 
     <string name="connection_label">Соединение</string>
     <string name="engine_badge">Движок ByeDPI</string>
-    <string name="status_ready">Нажмите кнопку, чтобы запустить локальное подключение</string>
-    <string name="status_running_local">Трафик обрабатывается на этом устройстве</string>
+    <string name="status_ready">Готово</string>
+    <string name="status_running_local">Активно</string>
     <string name="local_address_label">Локальный адрес</string>
     <string name="traffic_processing_label">Обработка трафика</string>
     <string name="traffic_processing_local">На устройстве</string>
@@ -33,7 +33,7 @@
     <string name="route_dial_description">Индикатор маршрута</string>
     <string name="route_dial_stopped">Маршрут остановлен</string>
     <string name="route_dial_running">Маршрут активен</string>
-    <string name="engine_attribution_short">Приложение GPL-3.0 · движок ByeDPI (MIT)</string>
+    <string name="engine_attribution_short">GPL-3.0 · ByeDPI</string>
     <string name="engine_attribution_title">Лицензии и компоненты</string>
     <string name="engine_attribution_summary">Zapret Mobile by lolososka и основа ByeDPIAndroid распространяются по GPL-3.0. Движок ByeDPI и туннель hev — по лицензии MIT.</string>
 
@@ -95,5 +95,14 @@
     <string name="desync_http_category">HTTP</string>
     <string name="desync_https_category">HTTPS</string>
     <string name="byedpi_protocols_category">Протоколы</string>
-    <string name="byedpi_protocols_hint">Снимите все отметки, чтобы применять стратегию ко всему трафику</string>
+    <string name="strategy_picker_title">Подбор стратегии</string>
+    <string name="strategy_picker_eyebrow">Zapret Mobile</string>
+    <string name="strategy_apply">Применить профиль</string>
+    <string name="strategy_picker_setting">Стратегия</string>
+    <string name="strategy_auto">Авто</string>
+    <string name="strategy_auto_summary">Мягкий старт</string>
+    <string name="strategy_balanced">Баланс</string>
+    <string name="strategy_balanced_summary">Универсальный профиль</string>
+    <string name="strategy_strong">Максимум</string>
+    <string name="strategy_strong_summary">Жёсткая блокировка</string>
 </resources>

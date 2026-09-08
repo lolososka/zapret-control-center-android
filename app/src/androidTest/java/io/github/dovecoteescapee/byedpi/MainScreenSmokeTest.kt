@@ -9,6 +9,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.dovecoteescapee.byedpi.activities.MainActivity
 import io.github.dovecoteescapee.byedpi.activities.SettingsActivity
+import io.github.dovecoteescapee.byedpi.activities.StrategyPickerActivity
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -34,6 +35,17 @@ class MainScreenSmokeTest {
         ActivityScenario.launch<SettingsActivity>(Intent(context, SettingsActivity::class.java)).use {
             instrumentation.waitForIdleSync()
             screenshot("settings.png")
+        }
+        ActivityScenario.launch<StrategyPickerActivity>(
+            Intent(context, StrategyPickerActivity::class.java)
+        ).use { scenario ->
+            instrumentation.waitForIdleSync()
+            scenario.onActivity { activity ->
+                val apply = activity.findViewById<TextView>(R.id.strategy_apply_button)
+                assertTrue("Strategy picker action has no label", apply.text.isNotBlank())
+                assertTrue("Strategy picker action is disabled", apply.isEnabled)
+            }
+            screenshot("strategy.png")
         }
     }
 

@@ -7,6 +7,8 @@ import androidx.appcompat.app.AppCompatDelegate
 import androidx.preference.*
 import io.github.dovecoteescapee.byedpi.BuildConfig
 import io.github.dovecoteescapee.byedpi.R
+import io.github.dovecoteescapee.byedpi.activities.StrategyPickerActivity
+import io.github.dovecoteescapee.byedpi.core.StrategyProfiles
 import io.github.dovecoteescapee.byedpi.data.Mode
 import io.github.dovecoteescapee.byedpi.utility.*
 
@@ -53,6 +55,12 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
         )
         val uiSettings = findPreferenceNotNull<Preference>("byedpi_ui_settings")
         val cmdSettings = findPreferenceNotNull<Preference>("byedpi_cmd_settings")
+        val strategyPicker = findPreferenceNotNull<Preference>("strategy_picker")
+
+        strategyPicker.setOnPreferenceClickListener {
+            startActivity(android.content.Intent(requireContext(), StrategyPickerActivity::class.java))
+            true
+        }
 
         val setByeDpiSettingsMode = { enable: Boolean ->
             uiSettings.isEnabled = !enable
@@ -68,6 +76,11 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
 
         findPreferenceNotNull<Preference>("version").summary = BuildConfig.VERSION_NAME
 
+        strategyPicker.summary = StrategyProfiles.title(
+            requireContext(),
+            requireNotNull(sharedPreferences),
+        )
+
         updatePreferences()
     }
 
@@ -82,6 +95,8 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
     }
 
     private fun updatePreferences() {
+        findPreferenceNotNull<Preference>("strategy_picker").summary =
+            StrategyProfiles.title(requireContext(), requireNotNull(sharedPreferences))
         val mode = findPreferenceNotNull<ListPreference>("byedpi_mode")
             .value.let { Mode.fromString(it) }
         val dns = findPreferenceNotNull<EditTextPreference>("dns_ip")

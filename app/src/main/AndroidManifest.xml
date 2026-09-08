@@ -39,6 +39,12 @@
             android:theme="@style/Theme.ZapretMobile.Settings"
             android:exported="false"/>
 
+        <activity
+            android:name=".activities.StrategyPickerActivity"
+            android:label="@string/strategy_picker_title"
+            android:theme="@style/Theme.ZapretMobile.Settings"
+            android:exported="false" />
+
         <service android:name=".services.ByeDpiVpnService"
             android:permission="android.permission.BIND_VPN_SERVICE"
             android:foregroundServiceType="specialUse"
