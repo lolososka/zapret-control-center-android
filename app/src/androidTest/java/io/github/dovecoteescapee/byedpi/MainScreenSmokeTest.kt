@@ -24,11 +24,12 @@ class MainScreenSmokeTest {
         ActivityScenario.launch<MainActivity>(Intent(context, MainActivity::class.java)).use { scenario ->
             instrumentation.waitForIdleSync()
             scenario.onActivity { activity ->
-                val start = activity.findViewById<TextView>(R.id.status_button)
+                val dial = activity.findViewById<View>(R.id.route_dial)
+                val oldStart = activity.findViewById<View>(R.id.status_button)
                 val strategy = activity.findViewById<TextView>(R.id.strategy_badge)
                 val settings = activity.findViewById<View>(R.id.settings_button)
-                assertTrue("Start action has no label", start.text.isNotBlank())
-                assertTrue("Start action is disabled", start.isEnabled)
+                assertTrue("Dial action is not clickable", dial.isClickable && dial.isShown)
+                assertTrue("Legacy start button is still visible", oldStart.visibility != View.VISIBLE)
                 assertTrue("Strategy badge has no label", strategy.text.isNotBlank())
                 assertTrue("Settings action is clipped", settings.isShown && settings.width > 0)
             }

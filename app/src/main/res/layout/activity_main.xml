@@ -139,6 +139,9 @@
                     android:layout_height="240dp"
                     android:layout_marginTop="2dp"
                     android:contentDescription="@string/route_dial_description"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:background="?attr/selectableItemBackgroundBorderless"
                     android:importantForAccessibility="yes" />
 
                 <TextView
@@ -198,6 +201,7 @@
                     android:textSize="16sp"
                     app:backgroundTint="@color/zapret_violet"
                     app:cornerRadius="16dp"
+                    android:visibility="gone"
                     tools:text="@string/vpn_connect" />
 
                 <TextView
@@ -209,6 +213,26 @@
                     android:textColor="@color/zapret_instrument_muted"
                     android:textSize="11sp"
                     tools:text="127.0.0.1:1080" />
+
+                <TextView
+                    android:id="@+id/connection_uptime"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:fontFamily="monospace"
+                    android:textColor="@color/zapret_instrument_muted"
+                    android:textSize="11sp"
+                    tools:text="Время 00:00:00 · ping —" />
+
+                <TextView
+                    android:id="@+id/connection_traffic"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="3dp"
+                    android:fontFamily="monospace"
+                    android:textColor="@color/zapret_instrument_muted"
+                    android:textSize="11sp"
+                    tools:text="↓ 0 Б   ↑ 0 Б" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
@@ -232,8 +256,12 @@
                 android:paddingBottom="8dp">
 
                 <LinearLayout
+                    android:id="@+id/mode_row"
                     android:layout_width="match_parent"
                     android:layout_height="56dp"
+                    android:background="?attr/selectableItemBackground"
+                    android:clickable="true"
+                    android:focusable="true"
                     android:gravity="center_vertical"
                     android:orientation="horizontal">
 
@@ -250,6 +278,13 @@
                         android:id="@+id/mode_value"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
+                        android:background="@drawable/bg_engine_chip"
+                        android:contentDescription="@string/mode_switch"
+                        android:paddingStart="10dp"
+                        android:paddingTop="5dp"
+                        android:paddingEnd="10dp"
+                        android:paddingBottom="5dp"
+                        android:clickable="false"
                         android:fontFamily="sans-serif-medium"
                         android:textColor="@color/zapret_ink"
                         android:textSize="14sp"

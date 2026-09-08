@@ -7,9 +7,11 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.net.TrafficStats
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Log
 import android.view.Menu
 import android.view.MenuItem
@@ -27,12 +29,25 @@ import io.github.dovecoteescapee.byedpi.services.ServiceManager
 import io.github.dovecoteescapee.byedpi.services.appStatus
 import io.github.dovecoteescapee.byedpi.utility.*
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.IOException
+import java.net.InetSocketAddress
+import java.net.Socket
+import java.util.Locale
 
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
+    private var metricsJob: Job? = null
+    private var pingJob: Job? = null
+    private var connectionStartedAt = 0L
+    private var rxBaseline = 0L
+    private var txBaseline = 0L
+    @Volatile private var lastPingMs: Long? = null
+    private var pendingMode: Mode? = null
 
     companion object {
         private val TAG: String = MainActivity::class.java.simpleName
@@ -108,7 +123,20 @@ class MainActivity : AppCompatActivity() {
 
             when (val action = intent.action) {
                 STARTED_BROADCAST,
-                STOPPED_BROADCAST -> updateStatus()
+                STOPPED_BROADCAST -> {
+                    updateStatus()
+                    if (action == STOPPED_BROADCAST) {
+                        val target = pendingMode
+                        pendingMode = null
+                        if (target != null) {
+                            getPreferences().edit()
+                                .putString("byedpi_mode", target.name.lowercase(Locale.ROOT))
+                                .apply()
+                            updateStatus()
+                            start()
+                        }
+                    }
+                }
 
                 FAILED_BROADCAST -> {
                     Toast.makeText(
@@ -144,13 +172,28 @@ class MainActivity : AppCompatActivity() {
         )
 
         binding.statusButton.setOnClickListener {
-            val (status, _) = appStatus
-            when (status) {
-                AppStatus.Halted -> start()
-                AppStatus.Running -> stop()
-            }
+            toggleConnection()
         }
 
+        binding.routeDial.setOnClickListener { toggleConnection() }
+        binding.routeDial.setOnTouchListener { view, event ->
+            when (event.actionMasked) {
+                android.view.MotionEvent.ACTION_DOWN -> view.animate()
+                    .scaleX(0.95f)
+                    .scaleY(0.95f)
+                    .setDuration(120L)
+                    .start()
+
+                android.view.MotionEvent.ACTION_UP,
+                android.view.MotionEvent.ACTION_CANCEL -> view.animate()
+                    .scaleX(1f)
+                    .scaleY(1f)
+                    .setDuration(180L)
+                    .start()
+            }
+            false
+        }
+        binding.modeRow.setOnClickListener { toggleMode() }
         binding.settingsButton.setOnClickListener { openSettings() }
         binding.strategyBadge.setOnClickListener {
             startActivity(Intent(this, StrategyPickerActivity::class.java))
@@ -159,7 +202,7 @@ class MainActivity : AppCompatActivity() {
 
         val theme = getPreferences()
             .getString("app_theme", null)
-        MainSettingsFragment.setTheme(theme ?: "system")
+        MainSettingsFragment.setTheme(theme ?: "dark")
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(
@@ -177,6 +220,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        metricsJob?.cancel()
+        pingJob?.cancel()
         super.onDestroy()
         unregisterReceiver(receiver)
     }
@@ -223,6 +268,27 @@ class MainActivity : AppCompatActivity() {
         ServiceManager.stop(this)
     }
 
+    private fun toggleConnection() {
+        when (appStatus.first) {
+            AppStatus.Halted -> start()
+            AppStatus.Running -> stop()
+        }
+    }
+
+    private fun toggleMode() {
+        val current = getPreferences().mode()
+        val target = if (current == Mode.VPN) Mode.Proxy else Mode.VPN
+        if (appStatus.first == AppStatus.Running) {
+            pendingMode = target
+            stop()
+        } else {
+            getPreferences().edit()
+                .putString("byedpi_mode", target.name.lowercase(Locale.ROOT))
+                .apply()
+            updateStatus()
+        }
+    }
+
     private fun openSettings(status: AppStatus = appStatus.first) {
         if (status == AppStatus.Halted) {
             startActivity(Intent(this, SettingsActivity::class.java))
@@ -260,11 +326,12 @@ class MainActivity : AppCompatActivity() {
             R.string.strategy_badge,
             StrategyProfiles.title(this, preferences),
         )
+        binding.routeDial.contentDescription = getString(R.string.dial_toggle)
 
         when (status) {
             AppStatus.Halted -> {
                 binding.routeDial.setRunning(false)
-                binding.routeDial.contentDescription = getString(R.string.route_dial_stopped)
+                binding.routeDial.contentDescription = getString(R.string.dial_toggle)
                 binding.statusDetail.setText(R.string.status_ready)
                 binding.statusDot.backgroundTintList = ColorStateList.valueOf(
                     ContextCompat.getColor(this, R.color.dial_quiet_strong)
@@ -281,11 +348,12 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
                 binding.statusButton.isEnabled = true
+                stopMetricsLoop()
             }
 
             AppStatus.Running -> {
                 binding.routeDial.setRunning(true)
-                binding.routeDial.contentDescription = getString(R.string.route_dial_running)
+                binding.routeDial.contentDescription = getString(R.string.dial_toggle)
                 binding.statusDetail.setText(R.string.status_running_local)
                 binding.statusDot.backgroundTintList = ColorStateList.valueOf(
                     ContextCompat.getColor(this, R.color.zapret_violet_soft)
@@ -302,7 +370,92 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
                 binding.statusButton.isEnabled = true
+                startMetricsLoop()
             }
         }
+    }
+
+    private fun startMetricsLoop() {
+        if (connectionStartedAt == 0L) {
+            connectionStartedAt = SystemClock.elapsedRealtime()
+            rxBaseline = supportedBytes(TrafficStats.getTotalRxBytes())
+            txBaseline = supportedBytes(TrafficStats.getTotalTxBytes())
+            lastPingMs = null
+        }
+        if (metricsJob?.isActive == true) return
+        metricsJob = lifecycleScope.launch {
+            var nextPingAt = 0L
+            while (isActive && appStatus.first == AppStatus.Running) {
+                val now = SystemClock.elapsedRealtime()
+                updateMetrics(now)
+                if (now >= nextPingAt && pingJob?.isActive != true) {
+                    nextPingAt = now + 5_000L
+                    pingJob = launch(Dispatchers.IO) {
+                        lastPingMs = measurePing()
+                    }
+                }
+                delay(1_000L)
+            }
+        }
+    }
+
+    private fun stopMetricsLoop() {
+        metricsJob?.cancel()
+        pingJob?.cancel()
+        metricsJob = null
+        pingJob = null
+        connectionStartedAt = 0L
+        lastPingMs = null
+        binding.connectionUptime.text = getString(
+            R.string.connection_uptime,
+            "00:00:00",
+            getString(R.string.metric_unavailable),
+        )
+        binding.connectionTraffic.text = getString(
+            R.string.connection_traffic,
+            "0 Б",
+            "0 Б",
+        )
+    }
+
+    private fun updateMetrics(now: Long) {
+        val elapsed = (now - connectionStartedAt).coerceAtLeast(0L) / 1_000L
+        val hours = elapsed / 3_600L
+        val minutes = (elapsed % 3_600L) / 60L
+        val seconds = elapsed % 60L
+        val uptime = String.format(Locale.ROOT, "%02d:%02d:%02d", hours, minutes, seconds)
+        val ping = lastPingMs?.let { "$it мс" } ?: getString(R.string.metric_unavailable)
+        val rx = (supportedBytes(TrafficStats.getTotalRxBytes()) - rxBaseline).coerceAtLeast(0L)
+        val tx = (supportedBytes(TrafficStats.getTotalTxBytes()) - txBaseline).coerceAtLeast(0L)
+        binding.connectionUptime.text = getString(R.string.connection_uptime, uptime, ping)
+        binding.connectionTraffic.text = getString(
+            R.string.connection_traffic,
+            formatBytes(rx),
+            formatBytes(tx),
+        )
+    }
+
+    private fun measurePing(): Long? {
+        val socket = Socket()
+        val started = SystemClock.elapsedRealtime()
+        return try {
+            socket.connect(InetSocketAddress("1.1.1.1", 443), 900)
+            SystemClock.elapsedRealtime() - started
+        } catch (_: IOException) {
+            null
+        } finally {
+            runCatching { socket.close() }
+        }
+    }
+
+    private fun supportedBytes(value: Long): Long =
+        if (value == TrafficStats.UNSUPPORTED.toLong() || value < 0L) 0L else value
+
+    private fun formatBytes(value: Long): String = when {
+        value < 1_024L -> "$value Б"
+        value < 1_024L * 1_024L -> String.format(Locale.ROOT, "%.1f КБ", value / 1_024f)
+        value < 1_024L * 1_024L * 1_024L ->
+            String.format(Locale.ROOT, "%.1f МБ", value / (1_024f * 1_024f))
+        else -> String.format(Locale.ROOT, "%.2f ГБ", value / (1_024f * 1_024f * 1_024f))
     }
 }
