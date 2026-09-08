@@ -37,15 +37,6 @@
             android:textSize="30sp"
             android:textStyle="bold" />
 
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:fontFamily="sans-serif"
-            android:text="@string/strategy_picker_subtitle"
-            android:textColor="@color/zapret_muted"
-            android:textSize="14sp" />
-
         <com.google.android.material.card.MaterialCardView
             android:id="@+id/strategy_auto_card"
             android:layout_width="match_parent"

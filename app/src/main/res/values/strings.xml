@@ -95,16 +95,14 @@
     <string name="desync_http_category">HTTP</string>
     <string name="desync_https_category">HTTPS</string>
     <string name="byedpi_protocols_category">Протоколы</string>
-    <string name="byedpi_protocols_hint">Снимите все отметки, чтобы применять стратегию ко всему трафику</string>
     <string name="strategy_picker_title">Подбор стратегии</string>
     <string name="strategy_picker_eyebrow">Zapret Mobile</string>
-    <string name="strategy_picker_subtitle">Выберите профиль под свою сеть.</string>
     <string name="strategy_apply">Применить профиль</string>
     <string name="strategy_picker_setting">Стратегия</string>
     <string name="strategy_auto">Авто</string>
-    <string name="strategy_auto_summary">Начать с мягкого профиля</string>
+    <string name="strategy_auto_summary">Мягкий старт</string>
     <string name="strategy_balanced">Баланс</string>
-    <string name="strategy_balanced_summary">Для большинства сетей</string>
+    <string name="strategy_balanced_summary">Универсальный профиль</string>
     <string name="strategy_strong">Максимум</string>
-    <string name="strategy_strong_summary">Если блокировка жёсткая</string>
+    <string name="strategy_strong_summary">Жёсткая блокировка</string>
 </resources>
