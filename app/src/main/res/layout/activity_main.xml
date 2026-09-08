@@ -166,6 +166,25 @@
                     android:textSize="14sp"
                     tools:text="@string/status_ready" />
 
+                <TextView
+                    android:id="@+id/strategy_badge"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:background="@drawable/bg_engine_chip"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:fontFamily="sans-serif-medium"
+                    android:includeFontPadding="false"
+                    android:paddingStart="11dp"
+                    android:paddingTop="7dp"
+                    android:paddingEnd="11dp"
+                    android:paddingBottom="7dp"
+                    android:textColor="@color/zapret_instrument_text"
+                    android:textSize="11sp"
+                    android:contentDescription="@string/strategy_change"
+                    tools:text="Стратегия · Баланс" />
+
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/status_button"
                     android:layout_width="match_parent"

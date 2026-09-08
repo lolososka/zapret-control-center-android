@@ -25,6 +25,8 @@
     <string name="engine_badge">Движок ByeDPI</string>
     <string name="status_ready">Готово</string>
     <string name="status_running_local">Активно</string>
+    <string name="strategy_badge">Стратегия · %1$s</string>
+    <string name="strategy_change">Сменить стратегию</string>
     <string name="local_address_label">Локальный адрес</string>
     <string name="traffic_processing_label">Обработка трафика</string>
     <string name="traffic_processing_local">На устройстве</string>
