@@ -45,6 +45,11 @@
             android:defaultValue="false" />
 
         <Preference
+            android:key="strategy_picker"
+            android:title="@string/strategy_picker_setting"
+            app:useSimpleSummaryProvider="true" />
+
+        <Preference
             android:key="byedpi_ui_settings"
             android:title="@string/ui_editor"
             app:useSimpleSummaryProvider="true"
@@ -63,8 +68,7 @@
 
         <Preference
             android:key="engine_attribution"
-            android:title="@string/engine_attribution_title"
-            android:summary="@string/engine_attribution_summary" />
+            android:title="@string/engine_attribution_title" />
 
         <Preference
             android:key="version"

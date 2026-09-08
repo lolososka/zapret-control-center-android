@@ -26,7 +26,7 @@
         <item name="disorder">Изменение порядка</item>
         <item name="fake">Подмена</item>
         <item name="oob">Вне полосы (OOB)</item>
-        <item name="oob">OOB с изменением порядка</item>
+        <item name="disoob">OOB с изменением порядка</item>
     </array>
     <array name="byedpi_desync_methods_entries">
         <item name="none">none</item>
@@ -34,7 +34,7 @@
         <item name="disorder">disorder</item>
         <item name="fake">fake</item>
         <item name="oob">oob</item>
-        <item name="oob">disoob</item>
+        <item name="disoob">disoob</item>
     </array>
 
     <array name="byedpi_hosts_modes">
