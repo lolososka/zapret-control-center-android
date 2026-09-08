@@ -2,4 +2,22 @@
 <resources>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+
+    <!-- Zapret Mobile: penthouse mist + dark instrument palette. -->
+    <color name="zapret_mist">#F3F5F8</color>
+    <color name="zapret_porcelain">#FFFFFF</color>
+    <color name="zapret_ink">#12161D</color>
+    <color name="zapret_muted">#6F7886</color>
+    <color name="zapret_line">#DDE2EA</color>
+    <color name="zapret_violet">#6653F3</color>
+    <color name="zapret_violet_dark">#5040CC</color>
+    <color name="zapret_violet_soft">#978BFF</color>
+    <color name="zapret_blue">#3E7BFA</color>
+    <color name="zapret_rose">#ED5B86</color>
+    <color name="zapret_instrument">#080B10</color>
+    <color name="zapret_instrument_surface">#111720</color>
+    <color name="zapret_instrument_text">#F7F8FA</color>
+    <color name="zapret_instrument_muted">#8C95A3</color>
+    <color name="dial_quiet">#2D3542</color>
+    <color name="dial_quiet_strong">#667183</color>
 </resources>

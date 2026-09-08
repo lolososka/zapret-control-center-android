@@ -12,16 +12,14 @@
         android:required="false" />    
 
     <application
-        android:allowBackup="true"
-        android:dataExtractionRules="@xml/data_extraction_rules"
-        android:fullBackupContent="@xml/backup_rules"
+        android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
-        android:banner="@mipmap/ic_launcher_foreground"
+        android:banner="@mipmap/ic_launcher"
         android:logo="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.ByeDPI"
+        android:theme="@style/Theme.ZapretMobile"
         tools:targetApi="34">
         <activity
             android:name=".activities.MainActivity"
@@ -38,7 +36,8 @@
         <activity
             android:name=".activities.SettingsActivity"
             android:label="@string/title_settings"
-            android:exported="true"/>
+            android:theme="@style/Theme.ZapretMobile.Settings"
+            android:exported="false"/>
 
         <service android:name=".services.ByeDpiVpnService"
             android:permission="android.permission.BIND_VPN_SERVICE"

@@ -1,5 +1,12 @@
 #include <string.h>
 #include <netdb.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <limits.h>
+#include <pthread.h>
+#include <stdlib.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 #include <jni.h>
 #include <android/log.h>
@@ -26,6 +33,59 @@ enum hosts_mode {
     HOSTS_WHITELIST,
 };
 
+// ByeDPI has process-global parameters. Serialize preparation and teardown across
+// both Android services, but never hold this mutex while the event loop runs.
+static pthread_mutex_t session_mutex = PTHREAD_MUTEX_INITIALIZER;
+static int session_handle = -1;
+static int next_handle = 0;
+static int session_fd = -1;
+static int control_fd = -1;
+static int session_running = 0;
+static char **session_args = NULL;
+static int session_argc = 0;
+
+static void release_params(void) {
+    reset_params();
+    // Some command-line options retain pointers into argv until the loop exits.
+    for (int i = 0; i < session_argc; i++) {
+        free(session_args[i]);
+    }
+    free(session_args);
+    session_args = NULL;
+    session_argc = 0;
+}
+
+static int begin_create(void) {
+    pthread_mutex_lock(&session_mutex);
+    if (session_handle >= 0 || next_handle == INT_MAX) {
+        pthread_mutex_unlock(&session_mutex);
+        return 0;
+    }
+    return 1;
+}
+
+// Called with session_mutex held on every preparation exit, including failure.
+static int finish_create(int fd) {
+    int handle = -1;
+    if (fd >= 0) {
+        // Keep a duplicate owned by the control path: event_loop closes its own
+        // fd before it returns, so using that integer to stop could hit another
+        // socket that happened to reuse it in the meantime.
+        control_fd = fcntl(fd, F_DUPFD_CLOEXEC, 0);
+        if (control_fd >= 0) {
+            session_fd = fd;
+            session_handle = handle = ++next_handle;
+        } else {
+            close(fd);
+        }
+    }
+    if (handle < 0) {
+        release_params();
+    }
+    pthread_mutex_unlock(&session_mutex);
+    return handle;
+}
+
 JNIEXPORT jint JNI_OnLoad(
         __attribute__((unused)) JavaVM *vm,
         __attribute__((unused)) void *reserved) {
@@ -38,29 +98,40 @@ Java_io_github_dovecoteescapee_byedpi_core_ByeDpiProxy_jniCreateSocketWithComman
         JNIEnv *env,
         __attribute__((unused)) jobject thiz,
         jobjectArray args) {
+    if (!begin_create()) return -1;
     int argc = (*env)->GetArrayLength(env, args);
-    char *argv[argc];
+    if (argc < 1) return finish_create(-1);
+    session_args = calloc((size_t)argc + 1, sizeof(char *));
+    if (!session_args) return finish_create(-1);
+    session_argc = argc;
     for (int i = 0; i < argc; i++) {
         jstring arg = (jstring) (*env)->GetObjectArrayElement(env, args, i);
+        if (!arg) return finish_create(-1);
         const char *arg_str = (*env)->GetStringUTFChars(env, arg, 0);
-        argv[i] = strdup(arg_str);
+        if (!arg_str) {
+            (*env)->DeleteLocalRef(env, arg);
+            return finish_create(-1);
+        }
+        session_args[i] = strdup(arg_str);
         (*env)->ReleaseStringUTFChars(env, arg, arg_str);
+        (*env)->DeleteLocalRef(env, arg);
+        if (!session_args[i]) return finish_create(-1);
     }
 
-    int res = parse_args(argc, argv);
+    int res = parse_args(argc, session_args);
     if (res < 0) {
         uniperror("parse_args");
-        return -1;
+        return finish_create(-1);
     }
 
     int fd = listen_socket((struct sockaddr_ina *)&params.laddr);
     if (fd < 0) {
         uniperror("listen_socket");
-        return -1;
+        return finish_create(-1);
     }
     LOG(LOG_S, "listen_socket, fd: %d", fd);
 
-    return fd;
+    return finish_create(fd);
 }
 
 JNIEXPORT jint JNICALL
@@ -95,6 +166,7 @@ Java_io_github_dovecoteescapee_byedpi_core_ByeDpiProxy_jniCreateSocket(
         jint udp_fake_count,
         jboolean drop_sack,
         jint fake_offset) {
+    if (!begin_create()) return -1;
     struct sockaddr_ina s;
 
     const char *address = (*env)->GetStringUTFChars(env, ip, 0);
@@ -102,7 +174,7 @@ Java_io_github_dovecoteescapee_byedpi_core_ByeDpiProxy_jniCreateSocket(
     (*env)->ReleaseStringUTFChars(env, ip, address);
     if (res < 0) {
         uniperror("get_addr");
-        return -1;
+        return finish_create(-1);
     }
 
     s.in.sin_port = htons(port);
@@ -120,8 +192,7 @@ Java_io_github_dovecoteescapee_byedpi_core_ByeDpiProxy_jniCreateSocket(
     if (!params.def_ttl) {
         if ((params.def_ttl = get_default_ttl()) < 1) {
             uniperror("get_default_ttl");
-            reset_params();
-            return -1;
+            return finish_create(-1);
         }
     }
 
@@ -133,8 +204,7 @@ Java_io_github_dovecoteescapee_byedpi_core_ByeDpiProxy_jniCreateSocket(
         );
         if (!dp) {
             uniperror("add");
-            reset_params();
-            return -1;
+            return finish_create(-1);
         }
 
         const char *str = (*env)->GetStringUTFChars(env, hosts, 0);
@@ -143,8 +213,7 @@ Java_io_github_dovecoteescapee_byedpi_core_ByeDpiProxy_jniCreateSocket(
         dp->hosts = parse_hosts(dp->file_ptr, dp->file_size);
         if (!dp->hosts) {
             perror("parse_hosts");
-            clear_params();
-            return -1;
+            return finish_create(-1);
         }
     }
 
@@ -155,8 +224,7 @@ Java_io_github_dovecoteescapee_byedpi_core_ByeDpiProxy_jniCreateSocket(
     );
     if (!dp) {
         uniperror("add");
-        reset_params();
-        return -1;
+        return finish_create(-1);
     }
 
     if (hosts_mode == HOSTS_BLACKLIST) {
@@ -166,8 +234,7 @@ Java_io_github_dovecoteescapee_byedpi_core_ByeDpiProxy_jniCreateSocket(
         dp->hosts = parse_hosts(dp->file_ptr, dp->file_size);
         if (!dp->hosts) {
             perror("parse_hosts");
-            clear_params();
-            return -1;
+            return finish_create(-1);
         }
     }
 
@@ -190,8 +257,7 @@ Java_io_github_dovecoteescapee_byedpi_core_ByeDpiProxy_jniCreateSocket(
     );
     if (!part) {
         uniperror("add");
-        reset_params();
-        return -1;
+        return finish_create(-1);
     }
 
     enum demode mode = DESYNC_METHODS[desync_method];
@@ -211,8 +277,7 @@ Java_io_github_dovecoteescapee_byedpi_core_ByeDpiProxy_jniCreateSocket(
 
         if (!tlsrec_part) {
             uniperror("add");
-            reset_params();
-            return -1;
+            return finish_create(-1);
         }
 
         tlsrec_part->flag = tls_record_split_at_sni ? offset_flag : 0;
@@ -228,7 +293,7 @@ Java_io_github_dovecoteescapee_byedpi_core_ByeDpiProxy_jniCreateSocket(
         (*env)->ReleaseStringUTFChars(env, fake_sni, sni);
         if (res) {
             fprintf(stderr, "error chsni\n");
-            return -1;
+            return finish_create(-1);
         }
     }
 
@@ -242,55 +307,81 @@ Java_io_github_dovecoteescapee_byedpi_core_ByeDpiProxy_jniCreateSocket(
                  &params.dp_count, sizeof(struct desync_params));
         if (!dp) {
             uniperror("add");
-            clear_params();
-            return -1;
+            return finish_create(-1);
         }
     }
 
     params.mempool = mem_pool(0);
     if (!params.mempool) {
         uniperror("mem_pool");
-        clear_params();
-        return -1;
+        return finish_create(-1);
     }
 
     int fd = listen_socket(&s);
     if (fd < 0) {
         uniperror("listen_socket");
-        return -1;
+        return finish_create(-1);
     }
     LOG(LOG_S, "listen_socket, fd: %d", fd);
 
-    return fd;
+    return finish_create(fd);
 }
 
 JNIEXPORT jint JNICALL
 Java_io_github_dovecoteescapee_byedpi_core_ByeDpiProxy_jniStartProxy(
         __attribute__((unused)) JNIEnv *env,
         __attribute__((unused)) jobject thiz,
-        jint fd) {
+        jint handle) {
+    pthread_mutex_lock(&session_mutex);
+    if (handle != session_handle || session_running) {
+        pthread_mutex_unlock(&session_mutex);
+        return ECANCELED;
+    }
+    int fd = session_fd;
+    session_running = 1;
     LOG(LOG_S, "start_proxy, fd: %d", fd);
     NOT_EXIT = 1;
-    if (event_loop(fd) < 0) {
+    pthread_mutex_unlock(&session_mutex);
+    int res = event_loop(fd);
+    int error = res < 0 ? get_e() : 0;
+    if (res < 0) {
         uniperror("event_loop");
-        return get_e();
     }
-    return 0;
+
+    // Params are shared with event_loop and its connection handlers. Free them
+    // only after that loop has fully returned; the stop JNI call runs on a
+    // different thread and must never invalidate memory still in use here.
+    pthread_mutex_lock(&session_mutex);
+    close(control_fd);
+    control_fd = session_fd = session_handle = -1;
+    session_running = 0;
+    release_params();
+    pthread_mutex_unlock(&session_mutex);
+    return res < 0 ? error : 0;
 }
 
 JNIEXPORT jint JNICALL
 Java_io_github_dovecoteescapee_byedpi_core_ByeDpiProxy_jniStopProxy(
         __attribute__((unused)) JNIEnv *env,
         __attribute__((unused)) jobject thiz,
-        jint fd) {
-    LOG(LOG_S, "stop_proxy, fd: %d", fd);
-
-    int res = shutdown(fd, SHUT_RDWR);
-    reset_params();
-
-    if (res < 0) {
-        uniperror("shutdown");
-        return get_e();
+        jint handle) {
+    pthread_mutex_lock(&session_mutex);
+    if (handle != session_handle) {
+        pthread_mutex_unlock(&session_mutex);
+        return 0; // Already finished; never act on a later session.
     }
-    return 0;
+    int error = 0;
+    if (session_running) {
+        LOG(LOG_S, "stop_proxy, control fd: %d", control_fd);
+        if (shutdown(control_fd, SHUT_RDWR) < 0) error = get_e();
+    } else {
+        // Stop won the race with the worker. No event loop can access these
+        // resources, and its captured generation will now be rejected by Start.
+        close(session_fd);
+        close(control_fd);
+        control_fd = session_fd = session_handle = -1;
+        release_params();
+    }
+    pthread_mutex_unlock(&session_mutex);
+    return error;
 }

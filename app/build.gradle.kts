@@ -6,13 +6,16 @@ plugins {
 android {
     namespace = "io.github.dovecoteescapee.byedpi"
     compileSdk = 34
+    ndkVersion = "26.1.10909125"
 
     defaultConfig {
-        applicationId = "io.github.dovecoteescapee.byedpi"
+        // Keep the source namespace for the native JNI bridge, but publish the
+        // fork as an independent app that can coexist with ByeDPIAndroid.
+        applicationId = "io.github.lolososka.zapretmobile"
         minSdk = 21
         targetSdk = 34
-        versionCode = 10
-        versionName = "1.2.0"
+        versionCode = 1
+        versionName = "0.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -55,6 +58,7 @@ android {
     buildFeatures {
         viewBinding = true
     }
+    sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/licenseAssets"))
 
     // https://android.izzysoft.de/articles/named/iod-scan-apkchecks?lang=en#blobs
     dependenciesInfo {
@@ -99,5 +103,18 @@ tasks.register<Exec>("runNdkBuild") {
 }
 
 tasks.preBuild {
-    dependsOn("runNdkBuild")
+    dependsOn("runNdkBuild", "prepareLicenseAssets")
+}
+
+tasks.register<Copy>("prepareLicenseAssets") {
+    into(layout.buildDirectory.dir("generated/licenseAssets/licenses"))
+    from(rootProject.file("LICENSE")) { rename { "GPL-3.0.txt" } }
+    from(rootProject.file("THIRD_PARTY_NOTICES.md"))
+    from("src/main/cpp/byedpi/LICENSE") { rename { "ByeDPI-MIT.txt" } }
+    from("src/main/cpp/byedpi/kavl.h") { rename { "KAVL-notice.txt" } }
+    from("src/main/jni/hev-socks5-tunnel/License") { rename { "hev-socks5-tunnel-MIT.txt" } }
+    from("src/main/jni/hev-socks5-tunnel/src/core/License") { rename { "hev-core-MIT.txt" } }
+    from("src/main/jni/hev-socks5-tunnel/third-part/hev-task-system/License") { rename { "hev-task-system-MIT.txt" } }
+    from("src/main/jni/hev-socks5-tunnel/third-part/lwip/License") { rename { "lwIP-BSD.txt" } }
+    from("src/main/jni/hev-socks5-tunnel/third-part/yaml/License") { rename { "libyaml-MIT.txt" } }
 }

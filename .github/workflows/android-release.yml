@@ -1,0 +1,506 @@
+name: Android release
+
+on:
+  push:
+    tags:
+      - "android-v*"
+
+# The repository-controlled build only needs to read the tagged source. The
+# signing job opts in to contents:write after the release environment gate.
+permissions:
+  contents: read
+
+concurrency:
+  group: android-release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Verify and build unsigned candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      candidate_id: ${{ steps.upload_candidate.outputs.artifact-id }}
+      candidate_digest: ${{ steps.upload_candidate.outputs.artifact-digest }}
+
+    env:
+      CI: "true"
+
+    steps:
+      - name: Checkout source and submodules
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Validate annotated tag, ancestry and application version
+        id: version
+        shell: bash
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$GITHUB_REF_NAME" =~ ^android-v([0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?)$ ]]; then
+            echo "::error::Tag must match android-vX.Y.Z (optionally with a prerelease suffix)."
+            exit 1
+          fi
+
+          if [[ "$(git cat-file -t "refs/tags/$GITHUB_REF_NAME")" != "tag" ]]; then
+            echo "::error::Release tag must be annotated, not lightweight."
+            exit 1
+          fi
+          if [[ "$(git rev-parse HEAD)" != "$(git rev-parse "refs/tags/${GITHUB_REF_NAME}^{commit}")" ]]; then
+            echo "::error::Checkout does not match the annotated release tag."
+            exit 1
+          fi
+
+          tag_version="${GITHUB_REF_NAME#android-v}"
+          app_version="$(sed -n 's/^[[:space:]]*versionName = "\([^"]*\)".*/\1/p' app/build.gradle.kts | head -n 1)"
+          if [[ -z "$app_version" || "$tag_version" != "$app_version" ]]; then
+            echo "::error::Tag version '$tag_version' does not match app version '$app_version'."
+            exit 1
+          fi
+
+          git fetch --no-tags origin "+refs/heads/$DEFAULT_BRANCH:refs/remotes/origin/$DEFAULT_BRANCH"
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}^{commit}" "refs/remotes/origin/$DEFAULT_BRANCH"; then
+            echo "::error::Release tag must point to a commit contained in origin/$DEFAULT_BRANCH."
+            exit 1
+          fi
+
+          submodule_status="$(git submodule status --recursive)"
+          if grep -Eq '^[+-U]' <<< "$submodule_status"; then
+            echo "::error::Every submodule must be checked out at the revision recorded by the release commit."
+            printf '%s\n' "$submodule_status"
+            exit 1
+          fi
+          if [[ -n "$(git status --porcelain --untracked-files=all --ignore-submodules=none)" ]]; then
+            echo "::error::Release checkout is not clean."
+            git status --short --untracked-files=all --ignore-submodules=none
+            exit 1
+          fi
+
+          echo "version=$tag_version" >> "$GITHUB_OUTPUT"
+
+      # Create the source offer before any repository-provided build program is
+      # executed. The recursive checkout includes the exact pinned submodules.
+      - name: Bundle exact corresponding source
+        id: source
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          source_name="zapret-mobile-${RELEASE_VERSION}-source"
+          source_root="$RUNNER_TEMP/$source_name"
+          candidate_dir="$RUNNER_TEMP/release-candidate"
+          source_archive="$candidate_dir/$source_name.tar.gz"
+          mkdir -p "$source_root" "$candidate_dir"
+
+          rsync -a --exclude='.git' ./ "$source_root/"
+          git submodule status --recursive > "$source_root/SUBMODULE_REVISIONS.txt"
+
+          source_date_epoch="$(git show -s --format=%ct "${GITHUB_SHA}^{commit}")"
+          tar \
+            --sort=name \
+            --mtime="@$source_date_epoch" \
+            --owner=0 \
+            --group=0 \
+            --numeric-owner \
+            -czf "$source_archive" \
+            -C "$RUNNER_TEMP" \
+            "$source_name"
+
+          echo "archive=$source_archive" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Java 17
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
+
+      - name: Install native and Android build tools
+        shell: bash
+        run: sdkmanager --install "ndk;26.1.10909125" "cmake;3.22.1" "build-tools;35.0.0"
+
+      - name: Lint, test and build unsigned release APK
+        shell: bash
+        run: bash ./gradlew --no-daemon --stacktrace lintRelease testReleaseUnitTest assembleRelease
+
+      - name: Assemble fail-closed release candidate
+        id: candidate
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          SOURCE_ARCHIVE: ${{ steps.source.outputs.archive }}
+        run: |
+          set -euo pipefail
+          candidate_dir="$RUNNER_TEMP/release-candidate"
+          unsigned_name="zapret-mobile-${RELEASE_VERSION}-unsigned.apk"
+          source_name="zapret-mobile-${RELEASE_VERSION}-source.tar.gz"
+          source_checksum_name="$source_name.sha256"
+          manifest_name="zapret-mobile-${RELEASE_VERSION}-candidate.sha256"
+
+          mapfile -t apks < <(find app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' -print)
+          if [[ "${#apks[@]}" -ne 1 ]]; then
+            echo "::error::Expected exactly one release APK, found ${#apks[@]}."
+            exit 1
+          fi
+          if ! unzip -tq "${apks[0]}" >/dev/null; then
+            echo "::error::Built APK is not a valid ZIP archive."
+            exit 1
+          fi
+          if "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify "${apks[0]}" >/dev/null 2>&1; then
+            echo "::error::Repository build unexpectedly produced an already-signed APK."
+            exit 1
+          fi
+
+          # Validate the native binaries before handing them to the signing
+          # runner. ZIP entry alignment is applied there before APK signing.
+          objdump="$ANDROID_HOME/ndk/26.1.10909125/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-objdump"
+          if [[ ! -x "$objdump" ]]; then
+            echo "::error::Pinned NDK llvm-objdump was not found."
+            exit 1
+          fi
+          mapfile -t native_entries < <(unzip -Z1 "${apks[0]}" | grep -E '^lib/[^/]+/[^/]+\.so$' || true)
+          if [[ "${#native_entries[@]}" -eq 0 ]]; then
+            echo "::error::Release APK contains no native libraries to validate."
+            exit 1
+          fi
+          elf_dir="$RUNNER_TEMP/elf-alignment"
+          mkdir -p "$elf_dir"
+          for entry in "${native_entries[@]}"; do
+            elf_file="$elf_dir/${entry//\//_}"
+            unzip -p "${apks[0]}" "$entry" > "$elf_file"
+            mapfile -t load_alignments < <(
+              "$objdump" -p "$elf_file" |
+                awk '$1 == "LOAD" { value=$NF; sub(/^2\*\*/, "", value); print value }'
+            )
+            if [[ "${#load_alignments[@]}" -eq 0 ]]; then
+              echo "::error::$entry has no ELF LOAD segments."
+              exit 1
+            fi
+            for exponent in "${load_alignments[@]}"; do
+              if [[ ! "$exponent" =~ ^[0-9]+$ ]] || (( exponent < 14 )); then
+                echo "::error::$entry has LOAD alignment '2**$exponent'; expected at least 2**14."
+                exit 1
+              fi
+            done
+          done
+
+          install -m 0644 "${apks[0]}" "$candidate_dir/$unsigned_name"
+          if [[ "$SOURCE_ARCHIVE" != "$candidate_dir/$source_name" || ! -s "$SOURCE_ARCHIVE" ]]; then
+            echo "::error::Corresponding source archive is missing or has an unexpected name."
+            exit 1
+          fi
+
+          (
+            cd "$candidate_dir"
+            sha256sum "$source_name" > "$source_checksum_name"
+            sha256sum "$unsigned_name" "$source_name" "$source_checksum_name" > "$manifest_name"
+          )
+
+          artifact_name="zapret-mobile-${RELEASE_VERSION}-unsigned-${GITHUB_SHA}"
+          echo "artifact_name=$artifact_name" >> "$GITHUB_OUTPUT"
+
+      - name: Upload immutable unsigned candidate
+        id: upload_candidate
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ steps.candidate.outputs.artifact_name }}
+          path: ${{ runner.temp }}/release-candidate/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+          overwrite: false
+
+  sign:
+    name: Sign candidate and create draft release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: release
+    permissions:
+      contents: write
+
+    steps:
+      - name: Validate build handoff metadata
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.build.outputs.version }}
+          CANDIDATE_ID: ${{ needs.build.outputs.candidate_id }}
+          CANDIDATE_DIGEST: ${{ needs.build.outputs.candidate_digest }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Build job returned an invalid release version."
+            exit 1
+          fi
+          if [[ "$GITHUB_REF_NAME" != "android-v$RELEASE_VERSION" ]]; then
+            echo "::error::Build version does not match the triggering tag."
+            exit 1
+          fi
+          if [[ ! "$CANDIDATE_ID" =~ ^[0-9]+$ ]]; then
+            echo "::error::Build job did not return a valid immutable artifact ID."
+            exit 1
+          fi
+          if [[ ! "$CANDIDATE_DIGEST" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error::Build job did not return a valid artifact SHA-256 digest."
+            exit 1
+          fi
+          echo "Using immutable artifact ID $CANDIDATE_ID with digest $CANDIDATE_DIGEST."
+
+      - name: Set up Java 17
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+
+      - name: Install Android signing tools
+        shell: bash
+        run: sdkmanager --install "build-tools;35.0.0"
+
+      # Download by the immutable artifact ID returned by the build job. This
+      # job never checks out source or invokes Gradle/repository scripts.
+      - name: Download exact unsigned candidate
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          artifact-ids: ${{ needs.build.outputs.candidate_id }}
+          path: ${{ runner.temp }}/release-candidate
+          merge-multiple: true
+
+      - name: Validate candidate files and checksums
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          candidate_dir="$RUNNER_TEMP/release-candidate"
+          output_dir="$RUNNER_TEMP/release-assets"
+          unsigned_name="zapret-mobile-${RELEASE_VERSION}-unsigned.apk"
+          source_name="zapret-mobile-${RELEASE_VERSION}-source.tar.gz"
+          source_checksum_name="$source_name.sha256"
+          manifest_name="zapret-mobile-${RELEASE_VERSION}-candidate.sha256"
+          expected=("$manifest_name" "$source_checksum_name" "$source_name" "$unsigned_name")
+
+          if [[ ! -d "$candidate_dir" ]]; then
+            echo "::error::Downloaded candidate directory is missing."
+            exit 1
+          fi
+          unexpected="$(find "$candidate_dir" -mindepth 1 -maxdepth 1 ! -type f -print -quit)"
+          if [[ -n "$unexpected" ]]; then
+            echo "::error::Candidate contains a non-regular top-level entry: $unexpected"
+            exit 1
+          fi
+          if ! diff -u \
+            <(printf '%s\n' "${expected[@]}" | LC_ALL=C sort) \
+            <(find "$candidate_dir" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort); then
+            echo "::error::Candidate does not contain exactly the expected files."
+            exit 1
+          fi
+          for filename in "${expected[@]}"; do
+            if [[ ! -s "$candidate_dir/$filename" ]]; then
+              echo "::error::Candidate file '$filename' is empty."
+              exit 1
+            fi
+          done
+
+          if [[ "$(wc -l < "$candidate_dir/$manifest_name")" -ne 3 ]] || \
+             grep -Eqv '^[0-9a-f]{64}  [A-Za-z0-9._-]+$' "$candidate_dir/$manifest_name"; then
+            echo "::error::Candidate checksum manifest has an invalid format."
+            exit 1
+          fi
+          manifest_expected=("$source_checksum_name" "$source_name" "$unsigned_name")
+          if ! diff -u \
+            <(printf '%s\n' "${manifest_expected[@]}" | LC_ALL=C sort) \
+            <(awk '{print $2}' "$candidate_dir/$manifest_name" | LC_ALL=C sort); then
+            echo "::error::Candidate checksum manifest names are not exact."
+            exit 1
+          fi
+          (
+            cd "$candidate_dir"
+            sha256sum --strict --check "$manifest_name"
+          )
+
+          if [[ "$(wc -l < "$candidate_dir/$source_checksum_name")" -ne 1 ]] || \
+             ! grep -Eq '^[0-9a-f]{64}  [A-Za-z0-9._-]+$' "$candidate_dir/$source_checksum_name" || \
+             [[ "$(awk '{print $2}' "$candidate_dir/$source_checksum_name")" != "$source_name" ]]; then
+            echo "::error::Source checksum file has an invalid format."
+            exit 1
+          fi
+          (
+            cd "$candidate_dir"
+            sha256sum --strict --check "$source_checksum_name"
+          )
+
+          if ! unzip -tq "$candidate_dir/$unsigned_name" >/dev/null; then
+            echo "::error::Unsigned APK is not a valid ZIP archive."
+            exit 1
+          fi
+          if "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify "$candidate_dir/$unsigned_name" >/dev/null 2>&1; then
+            echo "::error::Candidate APK is already signed."
+            exit 1
+          fi
+
+          source_root="zapret-mobile-${RELEASE_VERSION}-source"
+          source_listing="$RUNNER_TEMP/source-listing.txt"
+          tar -tzf "$candidate_dir/$source_name" > "$source_listing"
+          if [[ ! -s "$source_listing" ]] || grep -Eq '(^|/)\.\.(/|$)' "$source_listing"; then
+            echo "::error::Source archive contains an unsafe or unexpected path."
+            exit 1
+          fi
+          while IFS= read -r entry; do
+            if [[ "$entry" != "$source_root" && "$entry" != "$source_root/"* ]]; then
+              echo "::error::Source archive contains a path outside its expected root."
+              exit 1
+            fi
+          done < "$source_listing"
+
+          mkdir -p "$output_dir"
+          install -m 0644 "$candidate_dir/$source_name" "$output_dir/$source_name"
+          install -m 0644 "$candidate_dir/$source_checksum_name" "$output_dir/$source_checksum_name"
+
+      # Secrets are introduced only after the downloaded candidate has passed
+      # all structural and checksum checks.
+      - name: Require signing secrets and restore keystore
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_SIGNING_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_SIGNING_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for variable in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            if [[ -z "${!variable:-}" ]]; then
+              echo "::error::Required signing secret for $variable is missing."
+              missing=1
+            fi
+          done
+          if [[ "$missing" -ne 0 ]]; then
+            exit 1
+          fi
+
+          signing_dir="$RUNNER_TEMP/zapret-mobile-signing"
+          umask 077
+          mkdir -p "$signing_dir"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$signing_dir/release.keystore"
+          if [[ ! -s "$signing_dir/release.keystore" ]]; then
+            echo "::error::Decoded keystore is empty."
+            exit 1
+          fi
+
+      - name: Align, sign and verify APK
+        shell: bash
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_SIGNING_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD }}
+          RELEASE_VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          candidate_dir="$RUNNER_TEMP/release-candidate"
+          output_dir="$RUNNER_TEMP/release-assets"
+          signing_dir="$RUNNER_TEMP/zapret-mobile-signing"
+          unsigned_apk="$candidate_dir/zapret-mobile-${RELEASE_VERSION}-unsigned.apk"
+          aligned_apk="$signing_dir/aligned-unsigned.apk"
+          apk_name="zapret-mobile-${RELEASE_VERSION}.apk"
+          signed_apk="$output_dir/$apk_name"
+          build_tools="$ANDROID_HOME/build-tools/35.0.0"
+
+          "$build_tools/zipalign" -P 16 -f -v 4 "$unsigned_apk" "$aligned_apk"
+          "$build_tools/apksigner" sign \
+            --ks "$signing_dir/release.keystore" \
+            --ks-key-alias "$KEY_ALIAS" \
+            --ks-pass env:KEYSTORE_PASSWORD \
+            --key-pass env:KEY_PASSWORD \
+            --v4-signing-enabled false \
+            --out "$signed_apk" \
+            "$aligned_apk"
+          "$build_tools/zipalign" -c -P 16 -v 4 "$signed_apk"
+          "$build_tools/apksigner" verify --verbose --print-certs "$signed_apk"
+
+          (
+            cd "$output_dir"
+            sha256sum "$apk_name" > "$apk_name.sha256"
+          )
+
+          expected_assets=(
+            "$apk_name"
+            "$apk_name.sha256"
+            "zapret-mobile-${RELEASE_VERSION}-source.tar.gz"
+            "zapret-mobile-${RELEASE_VERSION}-source.tar.gz.sha256"
+          )
+          if ! diff -u \
+            <(printf '%s\n' "${expected_assets[@]}" | LC_ALL=C sort) \
+            <(find "$output_dir" -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort); then
+            echo "::error::Final release asset set is not exact."
+            exit 1
+          fi
+
+      - name: Upload signed release candidate
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: zapret-mobile-${{ needs.build.outputs.version }}-signed-${{ github.sha }}
+          path: ${{ runner.temp }}/release-assets/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+          overwrite: false
+
+      - name: Create draft GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          output_dir="$RUNNER_TEMP/release-assets"
+          apk="$output_dir/zapret-mobile-${RELEASE_VERSION}.apk"
+          apk_checksum="$apk.sha256"
+          source="$output_dir/zapret-mobile-${RELEASE_VERSION}-source.tar.gz"
+          source_checksum="$source.sha256"
+
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::A GitHub Release for this tag already exists. Remove or inspect it manually before retrying."
+            exit 1
+          fi
+          gh release create "$GITHUB_REF_NAME" \
+            "$apk" \
+            "$apk_checksum" \
+            "$source" \
+            "$source_checksum" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --draft \
+            --generate-notes \
+            --title "Zapret Mobile $RELEASE_VERSION"
+
+      - name: Remove signing material
+        if: always()
+        shell: bash
+        run: |
+          set -u
+          keystore="$RUNNER_TEMP/zapret-mobile-signing/release.keystore"
+          aligned_apk="$RUNNER_TEMP/zapret-mobile-signing/aligned-unsigned.apk"
+          if [[ -f "$keystore" ]]; then
+            shred -u "$keystore" || rm -f "$keystore"
+          fi
+          rm -f "$aligned_apk"
+          rmdir "$RUNNER_TEMP/zapret-mobile-signing" 2>/dev/null || true

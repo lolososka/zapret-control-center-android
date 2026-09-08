@@ -1,0 +1,50 @@
+package io.github.dovecoteescapee.byedpi
+
+import android.content.Intent
+import android.graphics.Bitmap
+import android.view.View
+import android.widget.TextView
+import androidx.test.core.app.ActivityScenario
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import io.github.dovecoteescapee.byedpi.activities.MainActivity
+import io.github.dovecoteescapee.byedpi.activities.SettingsActivity
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+import java.io.File
+
+@RunWith(AndroidJUnit4::class)
+class MainScreenSmokeTest {
+    @Test
+    fun mainAndSettingsOpenWithReachableControls() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        ActivityScenario.launch<MainActivity>(Intent(context, MainActivity::class.java)).use { scenario ->
+            instrumentation.waitForIdleSync()
+            scenario.onActivity { activity ->
+                val start = activity.findViewById<TextView>(R.id.status_button)
+                val settings = activity.findViewById<View>(R.id.settings_button)
+                assertTrue("Start action has no label", start.text.isNotBlank())
+                assertTrue("Start action is disabled", start.isEnabled)
+                assertTrue("Settings action is clipped", settings.isShown && settings.width > 0)
+            }
+            screenshot("main.png")
+        }
+        ActivityScenario.launch<SettingsActivity>(Intent(context, SettingsActivity::class.java)).use {
+            instrumentation.waitForIdleSync()
+            screenshot("settings.png")
+        }
+    }
+
+    private fun screenshot(name: String) {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val directory = File(instrumentation.targetContext.getExternalFilesDir(null), "smoke")
+        check(directory.isDirectory || directory.mkdirs())
+        val bitmap = checkNotNull(instrumentation.uiAutomation.takeScreenshot())
+        File(directory, name).outputStream().use {
+            check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it))
+        }
+        bitmap.recycle()
+    }
+}

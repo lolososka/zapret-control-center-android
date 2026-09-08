@@ -1,8 +1,8 @@
 package io.github.dovecoteescapee.byedpi.activities
 
 import android.Manifest
-import android.annotation.SuppressLint
 import android.content.BroadcastReceiver
+import android.content.res.ColorStateList
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -27,6 +27,7 @@ import io.github.dovecoteescapee.byedpi.services.appStatus
 import io.github.dovecoteescapee.byedpi.utility.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.IOException
 
 class MainActivity : AppCompatActivity() {
@@ -59,8 +60,8 @@ class MainActivity : AppCompatActivity() {
 
     private val logsRegister =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-            lifecycleScope.launch(Dispatchers.IO) {
-                val logs = collectLogs()
+            lifecycleScope.launch {
+                val logs = withContext(Dispatchers.IO) { collectLogs() }
 
                 if (logs == null) {
                     Toast.makeText(
@@ -73,14 +74,16 @@ class MainActivity : AppCompatActivity() {
                         Log.e(TAG, "No data in result")
                         return@launch
                     }
-                    contentResolver.openOutputStream(uri)?.use {
-                        try {
-                            it.write(logs.toByteArray())
-                        } catch (e: IOException) {
-                            Log.e(TAG, "Failed to save logs", e)
+                    withContext(Dispatchers.IO) {
+                        contentResolver.openOutputStream(uri)?.use {
+                            try {
+                                it.write(logs.toByteArray())
+                            } catch (e: IOException) {
+                                Log.e(TAG, "Failed to save logs", e)
+                            }
+                        } ?: run {
+                            Log.e(TAG, "Failed to open output stream")
                         }
-                    } ?: run {
-                        Log.e(TAG, "Failed to open output stream")
                     }
                 }
             }
@@ -132,12 +135,12 @@ class MainActivity : AppCompatActivity() {
             addAction(FAILED_BROADCAST)
         }
 
-        @SuppressLint("UnspecifiedRegisterReceiverFlag")
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(receiver, intentFilter, RECEIVER_EXPORTED)
-        } else {
-            registerReceiver(receiver, intentFilter)
-        }
+        ContextCompat.registerReceiver(
+            this,
+            receiver,
+            intentFilter,
+            ContextCompat.RECEIVER_NOT_EXPORTED,
+        )
 
         binding.statusButton.setOnClickListener {
             val (status, _) = appStatus
@@ -146,6 +149,9 @@ class MainActivity : AppCompatActivity() {
                 AppStatus.Running -> stop()
             }
         }
+
+        binding.settingsButton.setOnClickListener { openSettings() }
+        binding.saveLogsButton.setOnClickListener { saveLogs() }
 
         val theme = getPreferences()
             .getString("app_theme", null)
@@ -181,25 +187,12 @@ class MainActivity : AppCompatActivity() {
 
         return when (item.itemId) {
             R.id.action_settings -> {
-                if (status == AppStatus.Halted) {
-                    val intent = Intent(this, SettingsActivity::class.java)
-                    startActivity(intent)
-                } else {
-                    Toast.makeText(this, R.string.settings_unavailable, Toast.LENGTH_SHORT)
-                        .show()
-                }
+                openSettings(status)
                 true
             }
 
             R.id.action_save_logs -> {
-                val intent =
-                    Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
-                        addCategory(Intent.CATEGORY_OPENABLE)
-                        type = "text/plain"
-                        putExtra(Intent.EXTRA_TITLE, "byedpi.log")
-                    }
-
-                logsRegister.launch(intent)
+                saveLogs()
                 true
             }
 
@@ -226,6 +219,24 @@ class MainActivity : AppCompatActivity() {
         ServiceManager.stop(this)
     }
 
+    private fun openSettings(status: AppStatus = appStatus.first) {
+        if (status == AppStatus.Halted) {
+            startActivity(Intent(this, SettingsActivity::class.java))
+        } else {
+            Toast.makeText(this, R.string.settings_unavailable, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun saveLogs() {
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TITLE, "zapret-mobile.log")
+        }
+
+        logsRegister.launch(intent)
+    }
+
     private fun updateStatus() {
         val (status, mode) = appStatus
 
@@ -235,9 +246,21 @@ class MainActivity : AppCompatActivity() {
         val proxyIp = preferences.getStringNotNull("byedpi_proxy_ip", "127.0.0.1")
         val proxyPort = preferences.getStringNotNull("byedpi_proxy_port", "1080")
         binding.proxyAddress.text = getString(R.string.proxy_address, proxyIp, proxyPort)
+        binding.modeValue.setText(
+            when (preferences.mode()) {
+                Mode.VPN -> R.string.mode_vpn_value
+                Mode.Proxy -> R.string.mode_proxy_value
+            }
+        )
 
         when (status) {
             AppStatus.Halted -> {
+                binding.routeDial.setRunning(false)
+                binding.routeDial.contentDescription = getString(R.string.route_dial_stopped)
+                binding.statusDetail.setText(R.string.status_ready)
+                binding.statusDot.backgroundTintList = ColorStateList.valueOf(
+                    ContextCompat.getColor(this, R.color.dial_quiet_strong)
+                )
                 when (preferences.mode()) {
                     Mode.VPN -> {
                         binding.statusText.setText(R.string.vpn_disconnected)
@@ -253,6 +276,12 @@ class MainActivity : AppCompatActivity() {
             }
 
             AppStatus.Running -> {
+                binding.routeDial.setRunning(true)
+                binding.routeDial.contentDescription = getString(R.string.route_dial_running)
+                binding.statusDetail.setText(R.string.status_running_local)
+                binding.statusDot.backgroundTintList = ColorStateList.valueOf(
+                    ContextCompat.getColor(this, R.color.zapret_violet_soft)
+                )
                 when (mode) {
                     Mode.VPN -> {
                         binding.statusText.setText(R.string.vpn_connected)

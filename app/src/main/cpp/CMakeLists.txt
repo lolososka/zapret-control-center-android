@@ -10,5 +10,8 @@ target_include_directories(byedpi PRIVATE byedpi)
 
 target_compile_options(byedpi PRIVATE -std=c99 -O2 -D_XOPEN_SOURCE=500)
 target_compile_definitions(byedpi PRIVATE ANDROID_APP)
+target_link_options(byedpi PRIVATE
+        "-Wl,-z,max-page-size=16384"
+        "-Wl,-z,common-page-size=16384")
 
 target_link_libraries(byedpi PRIVATE android log)

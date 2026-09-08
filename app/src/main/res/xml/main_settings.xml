@@ -62,6 +62,11 @@
         android:title="@string/about_category">
 
         <Preference
+            android:key="engine_attribution"
+            android:title="@string/engine_attribution_title"
+            android:summary="@string/engine_attribution_summary" />
+
+        <Preference
             android:key="version"
             android:title="@string/version"
             app:useSimpleSummaryProvider="true"
@@ -73,7 +78,39 @@
             android:icon="@drawable/ic_github_36">
             <intent
                 android:action="android.intent.action.VIEW"
+                android:data="https://github.com/lolososka/zapret-control-center-android" />
+        </Preference>
+
+        <Preference
+            android:key="upstream_source_code"
+            android:title="@string/upstream_source_code_link">
+            <intent
+                android:action="android.intent.action.VIEW"
                 android:data="https://github.com/dovecoteescapee/ByeDPIAndroid" />
+        </Preference>
+
+        <Preference
+            android:key="engine_source_code"
+            android:title="@string/engine_source_code_link">
+            <intent
+                android:action="android.intent.action.VIEW"
+                android:data="https://github.com/hufrea/byedpi" />
+        </Preference>
+
+        <Preference
+            android:key="license"
+            android:title="@string/license_link">
+            <intent
+                android:action="android.intent.action.VIEW"
+                android:data="https://github.com/lolososka/zapret-control-center-android/blob/master/LICENSE" />
+        </Preference>
+
+        <Preference
+            android:key="third_party_notices"
+            android:title="@string/third_party_notices_link">
+            <intent
+                android:action="android.intent.action.VIEW"
+                android:data="https://github.com/lolososka/zapret-control-center-android/blob/master/THIRD_PARTY_NOTICES.md" />
         </Preference>
 
     </androidx.preference.PreferenceCategory>
