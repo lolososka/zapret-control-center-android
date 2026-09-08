@@ -22,6 +22,7 @@ import io.github.dovecoteescapee.byedpi.R
 import io.github.dovecoteescapee.byedpi.data.*
 import io.github.dovecoteescapee.byedpi.fragments.MainSettingsFragment
 import io.github.dovecoteescapee.byedpi.databinding.ActivityMainBinding
+import io.github.dovecoteescapee.byedpi.core.StrategyProfiles
 import io.github.dovecoteescapee.byedpi.services.ServiceManager
 import io.github.dovecoteescapee.byedpi.services.appStatus
 import io.github.dovecoteescapee.byedpi.utility.*
@@ -151,6 +152,9 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.settingsButton.setOnClickListener { openSettings() }
+        binding.strategyBadge.setOnClickListener {
+            startActivity(Intent(this, StrategyPickerActivity::class.java))
+        }
         binding.saveLogsButton.setOnClickListener { saveLogs() }
 
         val theme = getPreferences()
@@ -251,6 +255,10 @@ class MainActivity : AppCompatActivity() {
                 Mode.VPN -> R.string.mode_vpn_value
                 Mode.Proxy -> R.string.mode_proxy_value
             }
+        )
+        binding.strategyBadge.text = getString(
+            R.string.strategy_badge,
+            StrategyProfiles.title(this, preferences),
         )
 
         when (status) {

@@ -25,9 +25,11 @@ class MainScreenSmokeTest {
             instrumentation.waitForIdleSync()
             scenario.onActivity { activity ->
                 val start = activity.findViewById<TextView>(R.id.status_button)
+                val strategy = activity.findViewById<TextView>(R.id.strategy_badge)
                 val settings = activity.findViewById<View>(R.id.settings_button)
                 assertTrue("Start action has no label", start.text.isNotBlank())
                 assertTrue("Start action is disabled", start.isEnabled)
+                assertTrue("Strategy badge has no label", strategy.text.isNotBlank())
                 assertTrue("Settings action is clipped", settings.isShown && settings.width > 0)
             }
             screenshot("main.png")
