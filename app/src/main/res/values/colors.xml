@@ -3,15 +3,15 @@
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
 
-    <!-- Zapret Mobile: penthouse mist + dark instrument palette. -->
-    <color name="zapret_mist">#F3F5F8</color>
-    <color name="zapret_porcelain">#FFFFFF</color>
-    <color name="zapret_ink">#12161D</color>
-    <color name="zapret_muted">#6F7886</color>
-    <color name="zapret_line">#DDE2EA</color>
-    <color name="zapret_violet">#6653F3</color>
-    <color name="zapret_violet_dark">#5040CC</color>
-    <color name="zapret_violet_soft">#978BFF</color>
+    <!-- Zapret Mobile: graphite console + violet signal. -->
+    <color name="zapret_mist">#080B10</color>
+    <color name="zapret_porcelain">#111720</color>
+    <color name="zapret_ink">#F3F5F8</color>
+    <color name="zapret_muted">#9AA3B1</color>
+    <color name="zapret_line">#252D38</color>
+    <color name="zapret_violet">#8274FF</color>
+    <color name="zapret_violet_dark">#6653F3</color>
+    <color name="zapret_violet_soft">#AA9FFF</color>
     <color name="zapret_blue">#3E7BFA</color>
     <color name="zapret_rose">#ED5B86</color>
     <color name="zapret_mint">#91E6C4</color>

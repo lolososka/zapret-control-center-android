@@ -27,6 +27,12 @@
     <string name="status_running_local">Активно</string>
     <string name="strategy_badge">Стратегия · %1$s</string>
     <string name="strategy_change">Сменить стратегию</string>
+    <string name="mode_switch">Сменить режим</string>
+    <string name="telegram_compat">Telegram</string>
+    <string name="dial_toggle">Включить или выключить Zapret</string>
+    <string name="connection_uptime">Время %1$s · ping %2$s</string>
+    <string name="connection_traffic">↓ %1$s   ↑ %2$s</string>
+    <string name="metric_unavailable">—</string>
     <string name="local_address_label">Локальный адрес</string>
     <string name="traffic_processing_label">Обработка трафика</string>
     <string name="traffic_processing_local">На устройстве</string>

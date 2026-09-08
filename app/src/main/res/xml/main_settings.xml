@@ -12,7 +12,7 @@
             android:title="@string/theme_settings"
             android:entries="@array/themes"
             android:entryValues="@array/themes_entries"
-            android:defaultValue="system"
+            android:defaultValue="dark"
             app:useSimpleSummaryProvider="true" />
 
         <DropDownPreference
@@ -33,6 +33,11 @@
             android:key="ipv6_enable"
             android:title="@string/ipv6_setting"
             android:defaultValue="false" />
+
+        <SwitchPreference
+            android:key="telegram_compat"
+            android:title="@string/telegram_compat"
+            android:defaultValue="true" />
 
     </androidx.preference.PreferenceCategory>
 

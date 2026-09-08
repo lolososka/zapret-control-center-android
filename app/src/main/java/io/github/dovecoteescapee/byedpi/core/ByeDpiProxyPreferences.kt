@@ -104,7 +104,8 @@ class ByeDpiProxyUIPreferences(
         noDomain = preferences.getBoolean("byedpi_no_domain", false),
         desyncHttp = preferences.getBoolean("byedpi_desync_http", true),
         desyncHttps = preferences.getBoolean("byedpi_desync_https", true),
-        desyncUdp = preferences.getBoolean("byedpi_desync_udp", false),
+        desyncUdp = preferences.getBoolean("byedpi_desync_udp", false) ||
+            preferences.getBoolean("telegram_compat", true),
         desyncMethod = preferences.getString("byedpi_desync_method", null)
             ?.let { DesyncMethod.fromName(it) },
         splitPosition = preferences.getString("byedpi_split_position", null)?.toIntOrNull(),

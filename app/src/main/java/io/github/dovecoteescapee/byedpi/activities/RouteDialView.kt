@@ -3,7 +3,6 @@ package io.github.dovecoteescapee.byedpi.activities
 import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Canvas
-import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.SweepGradient
@@ -158,39 +157,18 @@ class RouteDialView @JvmOverloads constructor(
     }
 
     private fun drawCenterMark(canvas: Canvas, cx: Float, cy: Float, size: Float) {
-        fillPaint.color = if (running) Color.WHITE else quietStrong
-        fillPaint.alpha = if (running) 255 else 190
+        linePaint.shader = null
+        linePaint.style = Paint.Style.STROKE
+        linePaint.strokeWidth = dp(2.4f)
+        linePaint.strokeCap = Paint.Cap.ROUND
+        linePaint.color = if (running) violetSoft else quietStrong
+        linePaint.alpha = if (running) 255 else 220
 
-        val barWidth = size * 0.13f
-        val barHeight = dp(3f)
-        val left = cx - barWidth / 2f
-        canvas.drawRoundRect(
-            left,
-            cy - dp(10f),
-            left + barWidth * 0.72f,
-            cy - dp(10f) + barHeight,
-            barHeight,
-            barHeight,
-            fillPaint,
-        )
-        canvas.drawRoundRect(
-            left + barWidth * 0.18f,
-            cy - barHeight / 2f,
-            left + barWidth,
-            cy + barHeight / 2f,
-            barHeight,
-            barHeight,
-            fillPaint,
-        )
-        canvas.drawRoundRect(
-            left,
-            cy + dp(7f),
-            left + barWidth * 0.58f,
-            cy + dp(7f) + barHeight,
-            barHeight,
-            barHeight,
-            fillPaint,
-        )
+        val radius = size * 0.085f
+        val arc = RectF(cx - radius, cy - radius, cx + radius, cy + radius)
+        canvas.drawArc(arc, -42f, 264f, false, linePaint)
+        canvas.drawLine(cx, cy - radius - dp(8f), cx, cy - dp(1f), linePaint)
+        linePaint.style = Paint.Style.STROKE
     }
 
     private fun startAnimationIfAllowed() {
