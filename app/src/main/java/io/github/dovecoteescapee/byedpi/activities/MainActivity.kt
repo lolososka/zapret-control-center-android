@@ -449,7 +449,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun supportedBytes(value: Long): Long =
-        if (value == TrafficStats.UNSUPPORTED || value < 0L) 0L else value
+        if (value == TrafficStats.UNSUPPORTED.toLong() || value < 0L) 0L else value
 
     private fun formatBytes(value: Long): String = when {
         value < 1_024L -> "$value Б"
