@@ -3,6 +3,8 @@ package io.github.dovecoteescapee.byedpi.activities
 import android.Manifest
 import android.animation.ValueAnimator
 import android.content.BroadcastReceiver
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.res.ColorStateList
 import android.content.Context
 import android.content.Intent
@@ -20,6 +22,7 @@ import android.view.View
 import android.view.animation.PathInterpolator
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
@@ -230,6 +233,7 @@ class MainActivity : AppCompatActivity() {
             restartAfterProfile = appStatus.first == AppStatus.Running
             profilePickerRegister.launch(Intent(this, StrategyPickerActivity::class.java))
         }
+        binding.telegramSetupButton.setOnClickListener { showTelegramSetup() }
         binding.saveLogsButton.setOnClickListener { saveLogs() }
 
         val theme = getPreferences()
@@ -339,6 +343,70 @@ class MainActivity : AppCompatActivity() {
         logsRegister.launch(intent)
     }
 
+    private fun showTelegramSetup() {
+        val preferences = getPreferences()
+        val proxyIp = preferences.getStringNotNull("byedpi_proxy_ip", "127.0.0.1")
+        val proxyPort = preferences.getStringNotNull("byedpi_proxy_port", "1080")
+        AlertDialog.Builder(this)
+            .setTitle(R.string.telegram_setup_title)
+            .setMessage(getString(R.string.telegram_setup_message, proxyIp, proxyPort))
+            .setNeutralButton(R.string.telegram_check_proxy) { _, _ ->
+                checkTelegramProxy(proxyIp, proxyPort)
+            }
+            .setNegativeButton(R.string.telegram_copy_proxy) { _, _ ->
+                copyTelegramProxy(proxyIp, proxyPort)
+            }
+            .setPositiveButton(R.string.telegram_open_app) { _, _ -> openTelegram() }
+            .show()
+    }
+
+    private fun copyTelegramProxy(proxyIp: String, proxyPort: String) {
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(
+            ClipData.newPlainText("Telegram SOCKS5", "$proxyIp:$proxyPort")
+        )
+        Toast.makeText(this, R.string.telegram_proxy_copied, Toast.LENGTH_SHORT).show()
+    }
+
+    private fun openTelegram() {
+        val launchIntent = packageManager.getLaunchIntentForPackage("org.telegram.messenger")
+            ?: packageManager.getLaunchIntentForPackage("org.telegram.messenger.web")
+            ?: packageManager.getLaunchIntentForPackage("org.thunderdog.challegram")
+        if (launchIntent == null) {
+            Toast.makeText(this, R.string.telegram_not_installed, Toast.LENGTH_SHORT).show()
+        } else {
+            startActivity(launchIntent)
+        }
+    }
+
+    private fun checkTelegramProxy(proxyIp: String, proxyPort: String) {
+        Toast.makeText(this, R.string.telegram_proxy_checking, Toast.LENGTH_SHORT).show()
+        lifecycleScope.launch(Dispatchers.IO) {
+            val available = try {
+                Socket().use { socket ->
+                    socket.connect(
+                        InetSocketAddress(proxyIp, proxyPort.toIntOrNull() ?: 1080),
+                        700,
+                    )
+                    true
+                }
+            } catch (_: Exception) {
+                false
+            }
+            withContext(Dispatchers.Main) {
+                Toast.makeText(
+                    this@MainActivity,
+                    if (available) {
+                        R.string.telegram_proxy_check_ok
+                    } else {
+                        R.string.telegram_proxy_check_failed
+                    },
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+        }
+    }
+
     private fun updateStatus() {
         val (status, mode) = appStatus
 
@@ -349,6 +417,18 @@ class MainActivity : AppCompatActivity() {
         val proxyIp = preferences.getStringNotNull("byedpi_proxy_ip", "127.0.0.1")
         val proxyPort = preferences.getStringNotNull("byedpi_proxy_port", "1080")
         binding.proxyAddress.text = getString(R.string.proxy_address, proxyIp, proxyPort)
+        binding.telegramProxyAddress.text = getString(
+            R.string.telegram_proxy_address,
+            proxyIp,
+            proxyPort,
+        )
+        binding.telegramProxyStatus.setText(
+            if (status == AppStatus.Running && selectedMode == Mode.Proxy) {
+                R.string.telegram_proxy_ready
+            } else {
+                R.string.telegram_proxy_off
+            }
+        )
         binding.modeValue.setText(
             when (selectedMode) {
                 Mode.VPN -> R.string.mode_vpn_value

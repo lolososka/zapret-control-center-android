@@ -20,6 +20,22 @@
     <string name="reset_settings">Сбросить</string>
     <string name="logs_failed">Не удалось собрать журнал</string>
     <string name="proxy_address">%1$s:%2$s</string>
+    <string name="telegram_card_title">Telegram</string>
+    <string name="telegram_card_summary">Локальный SOCKS5 для ручного подключения</string>
+    <string name="telegram_proxy_off">ПРОКСИ ВЫКЛЮЧЕН</string>
+    <string name="telegram_proxy_ready">ПРОКСИ ДОСТУПЕН</string>
+    <string name="telegram_proxy_address">SOCKS5  %1$s:%2$s</string>
+    <string name="telegram_setup">Настроить</string>
+    <string name="telegram_setup_title">Прокси Telegram</string>
+    <string name="telegram_setup_message">Для ручного подключения в Telegram откройте Настройки → Данные и память → Прокси → Добавить прокси. Выберите SOCKS5 и укажите:\n\nСервер: %1$s\nПорт: %2$s\n\nРежим «Локальный прокси» должен быть запущен. В режиме VPN прокси Telegram обычно включать не нужно.</string>
+    <string name="telegram_copy_proxy">Скопировать адрес</string>
+    <string name="telegram_open_app">Открыть Telegram</string>
+    <string name="telegram_check_proxy">Проверить прокси</string>
+    <string name="telegram_proxy_copied">Адрес прокси скопирован</string>
+    <string name="telegram_proxy_checking">Проверяю локальный прокси…</string>
+    <string name="telegram_proxy_check_ok">Локальный прокси доступен</string>
+    <string name="telegram_proxy_check_failed">Прокси не отвечает. Сначала запустите режим «Локальный прокси».</string>
+    <string name="telegram_not_installed">Telegram не найден на устройстве</string>
 
     <string name="connection_label">Соединение</string>
     <string name="connection_badge">Защита соединения</string>
