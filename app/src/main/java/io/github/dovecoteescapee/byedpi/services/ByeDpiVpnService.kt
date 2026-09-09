@@ -49,6 +49,10 @@ class ByeDpiVpnService : LifecycleVpnService() {
 
     override fun onCreate() {
         super.onCreate()
+        // A recreated service must not inherit a stale in-memory status from a
+        // previous instance after Android reclaimed the process.
+        status = ServiceStatus.Disconnected
+        setStatus(AppStatus.Halted, Mode.VPN)
         registerNotificationChannel(
             this,
             NOTIFICATION_CHANNEL_ID,

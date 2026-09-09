@@ -116,6 +116,7 @@
     <string name="strategy_balanced_summary">Универсальный профиль</string>
     <string name="strategy_strong">Максимум</string>
     <string name="strategy_strong_summary">Максимальная совместимость</string>
+    <string name="strategy_applied_restart">Профиль применён · соединение перезапускается</string>
     <string name="strategy_messaging">Мессенджеры</string>
     <string name="strategy_messaging_summary">Надёжнее для чатов и звонков</string>
     <string name="strategy_games">Игровой трафик</string>

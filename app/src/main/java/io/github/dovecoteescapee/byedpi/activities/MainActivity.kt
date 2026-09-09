@@ -52,6 +52,8 @@ class MainActivity : AppCompatActivity() {
     private var txBaseline = 0L
     @Volatile private var lastPingMs: Long? = null
     private var pendingMode: Mode? = null
+    private var pendingServiceRestart = false
+    private var restartAfterProfile = false
     private var lastVisualStatus: AppStatus? = null
     private var lastVisualMode: Mode? = null
 
@@ -120,6 +122,24 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+    private val profilePickerRegister =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            val shouldRestart = restartAfterProfile && appStatus.first == AppStatus.Running
+            restartAfterProfile = false
+            if (result.resultCode == RESULT_OK) {
+                updateStatus()
+                if (shouldRestart) {
+                    pendingServiceRestart = true
+                    Toast.makeText(
+                        this,
+                        R.string.strategy_applied_restart,
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                    stop()
+                }
+            }
+        }
+
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (debugLoggingEnabled()) Log.d(TAG, "Received intent: ${intent?.action}")
@@ -143,11 +163,15 @@ class MainActivity : AppCompatActivity() {
                     if (action == STOPPED_BROADCAST) {
                         val target = pendingMode
                         pendingMode = null
+                        val restart = pendingServiceRestart
+                        pendingServiceRestart = false
                         if (target != null) {
                             getPreferences().edit()
                                 .putString("byedpi_mode", target.name.lowercase(Locale.ROOT))
                                 .apply()
                             updateStatus()
+                        }
+                        if (target != null || restart) {
                             start()
                         }
                     }
@@ -203,7 +227,8 @@ class MainActivity : AppCompatActivity() {
         binding.modeRow.setOnClickListener { toggleMode() }
         binding.settingsButton.setOnClickListener { openSettings() }
         binding.strategyBadge.setOnClickListener {
-            startActivity(Intent(this, StrategyPickerActivity::class.java))
+            restartAfterProfile = appStatus.first == AppStatus.Running
+            profilePickerRegister.launch(Intent(this, StrategyPickerActivity::class.java))
         }
         binding.saveLogsButton.setOnClickListener { saveLogs() }
 
