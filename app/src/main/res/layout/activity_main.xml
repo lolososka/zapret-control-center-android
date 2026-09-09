@@ -128,7 +128,7 @@
                         android:paddingTop="7dp"
                         android:paddingEnd="11dp"
                         android:paddingBottom="7dp"
-                        android:text="@string/engine_badge"
+                        android:text="@string/connection_badge"
                         android:textColor="@color/zapret_instrument_text"
                         android:textSize="11sp" />
                 </LinearLayout>
@@ -340,7 +340,7 @@
             android:layout_height="wrap_content"
             android:gravity="center"
             android:fontFamily="sans-serif"
-            android:text="@string/engine_attribution_short"
+            android:text="@string/footer_local"
             android:textColor="@color/zapret_muted"
             android:textSize="11sp" />
     </LinearLayout>
