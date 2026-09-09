@@ -10,6 +10,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.net.TrafficStats
 import android.net.VpnService
 import android.os.Build
@@ -356,7 +357,9 @@ class MainActivity : AppCompatActivity() {
             .setNegativeButton(R.string.telegram_copy_proxy) { _, _ ->
                 copyTelegramProxy(proxyIp, proxyPort)
             }
-            .setPositiveButton(R.string.telegram_open_app) { _, _ -> openTelegram() }
+            .setPositiveButton(R.string.telegram_add_proxy) { _, _ ->
+                addTelegramProxy(proxyIp, proxyPort)
+            }
             .show()
     }
 
@@ -377,6 +380,59 @@ class MainActivity : AppCompatActivity() {
         } else {
             startActivity(launchIntent)
         }
+    }
+
+    /**
+     * Opens Telegram's official SOCKS5 deep link. Telegram shows the proxy
+     * card with the server and port already filled in; the user only confirms
+     * the connection. Android does not allow another app to silently mutate
+     * Telegram's settings, so the explicit confirmation is intentional.
+     */
+    private fun addTelegramProxy(proxyIp: String, proxyPort: String) {
+        val port = proxyPort.toIntOrNull()
+        if (port == null || port !in 1..65535) {
+            Toast.makeText(this, R.string.telegram_proxy_invalid, Toast.LENGTH_LONG).show()
+            return
+        }
+
+        val preferences = getPreferences()
+        if (appStatus.first != AppStatus.Running || preferences.mode() != Mode.Proxy) {
+            Toast.makeText(this, R.string.telegram_proxy_start_first, Toast.LENGTH_LONG).show()
+            return
+        }
+
+        val uri = Uri.Builder()
+            .scheme("tg")
+            .authority("socks")
+            .appendQueryParameter("server", proxyIp)
+            .appendQueryParameter("port", port.toString())
+            .build()
+
+        val packageCandidates = listOf(
+            "org.telegram.messenger",
+            "org.telegram.messenger.web",
+            "org.thunderdog.challegram",
+        )
+        for (packageName in packageCandidates) {
+            val intent = Intent(Intent.ACTION_VIEW, uri).setPackage(packageName)
+            if (packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY) != null) {
+                startActivity(intent)
+                Toast.makeText(this, R.string.telegram_proxy_opened, Toast.LENGTH_SHORT).show()
+                return
+            }
+        }
+
+        // A small number of Telegram builds do not expose package metadata to
+        // queries. Keep a generic fallback before showing the manual path.
+        val genericIntent = Intent(Intent.ACTION_VIEW, uri)
+        if (packageManager.resolveActivity(genericIntent, PackageManager.MATCH_DEFAULT_ONLY) != null) {
+            startActivity(genericIntent)
+            Toast.makeText(this, R.string.telegram_proxy_opened, Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        openTelegram()
+        Toast.makeText(this, R.string.telegram_proxy_manual_fallback, Toast.LENGTH_LONG).show()
     }
 
     private fun checkTelegramProxy(proxyIp: String, proxyPort: String) {
