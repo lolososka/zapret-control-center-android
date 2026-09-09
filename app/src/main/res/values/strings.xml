@@ -16,19 +16,19 @@
     <string name="vpn_permission_denied">Разрешение VPN не выдано</string>
     <string name="settings_unavailable">Сначала выключите Zapret</string>
     <string name="title_settings">Настройки</string>
-    <string name="save_logs">Сохранить журнал</string>
+    <string name="save_logs">Сохранить диагностику</string>
     <string name="reset_settings">Сбросить</string>
     <string name="logs_failed">Не удалось собрать журнал</string>
     <string name="proxy_address">%1$s:%2$s</string>
 
     <string name="connection_label">Соединение</string>
-    <string name="engine_badge">Движок ByeDPI</string>
+    <string name="connection_badge">Защита соединения</string>
     <string name="status_ready">Готово</string>
     <string name="status_running_local">Активно</string>
     <string name="strategy_badge">Стратегия · %1$s</string>
     <string name="strategy_change">Сменить стратегию</string>
     <string name="mode_switch">Сменить режим</string>
-    <string name="telegram_compat">Telegram</string>
+    <string name="messaging_compat">Совместимость с мессенджерами</string>
     <string name="dial_toggle">Включить или выключить Zapret</string>
     <string name="connection_uptime">Время %1$s · ping %2$s</string>
     <string name="connection_traffic">↓ %1$s   ↑ %2$s</string>
@@ -41,9 +41,9 @@
     <string name="route_dial_description">Индикатор маршрута</string>
     <string name="route_dial_stopped">Маршрут остановлен</string>
     <string name="route_dial_running">Маршрут активен</string>
-    <string name="engine_attribution_short">GPL-3.0 · ByeDPI</string>
-    <string name="engine_attribution_title">Лицензии и компоненты</string>
-    <string name="engine_attribution_summary">Zapret Mobile by lolososka и основа ByeDPIAndroid распространяются по GPL-3.0. Движок ByeDPI и туннель hev — по лицензии MIT.</string>
+    <string name="footer_local">Локально · без учётной записи</string>
+    <string name="components_attribution_title">Открытые компоненты</string>
+    <string name="components_attribution_summary">Zapret Mobile и сторонние компоненты распространяются по своим открытым лицензиям. Полный список доступен в разделе «О приложении».</string>
 
     <string name="theme_settings">Оформление</string>
     <string name="mode_setting">Режим</string>
@@ -67,7 +67,7 @@
     <string name="version">Версия</string>
     <string name="source_code_link">Zapret Mobile: исходный код</string>
     <string name="upstream_source_code_link">Основа ByeDPIAndroid</string>
-    <string name="engine_source_code_link">Движок ByeDPI</string>
+    <string name="components_source_code_link">Открытые компоненты</string>
     <string name="license_link">Лицензия GPL-3.0</string>
     <string name="third_party_notices_link">Авторы и сторонние компоненты</string>
     <string name="byedpi_readme_link">Справка по параметрам ByeDPI</string>
@@ -75,10 +75,13 @@
     <string name="vpn_channel_name">VPN-подключение</string>
     <string name="proxy_channel_name">Локальный прокси</string>
     <string name="notification_title">Zapret Mobile</string>
-    <string name="vpn_notification_content">Zapret работает в режиме VPN · движок ByeDPI</string>
-    <string name="proxy_notification_content">Локальный прокси запущен · движок ByeDPI</string>
+    <string name="vpn_notification_content">Zapret работает в режиме VPN · соединение активно</string>
+    <string name="proxy_notification_content">Локальный режим активен</string>
     <string name="general_category">Основное</string>
-    <string name="byedpi_category">Стратегия ByeDPI</string>
+    <string name="byedpi_category">Параметры соединения</string>
+    <string name="privacy_category">Приватность</string>
+    <string name="privacy_minimal_logs">Краткая диагностика</string>
+    <string name="privacy_minimal_logs_summary">Подробный системный журнал не экспортируется без вашего разрешения</string>
     <string name="about_category">О приложении</string>
     <string name="command_line_editor">Аргументы командной строки</string>
     <string name="ui_editor">Параметры стратегии</string>
@@ -112,5 +115,9 @@
     <string name="strategy_balanced">Баланс</string>
     <string name="strategy_balanced_summary">Универсальный профиль</string>
     <string name="strategy_strong">Максимум</string>
-    <string name="strategy_strong_summary">Жёсткая блокировка</string>
+    <string name="strategy_strong_summary">Максимальная совместимость</string>
+    <string name="strategy_messaging">Мессенджеры</string>
+    <string name="strategy_messaging_summary">Надёжнее для чатов и звонков</string>
+    <string name="strategy_games">Игровой трафик</string>
+    <string name="strategy_games_summary">Мягкая обработка UDP</string>
 </resources>

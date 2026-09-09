@@ -20,6 +20,8 @@ object StrategyProfiles {
         val tlsRecordSplitAtSni: Boolean,
         val fakeTtl: Int,
         val fakeOffset: Int,
+        val desyncUdp: Boolean = false,
+        val udpFakeCount: Int = 0,
     ) {
         Auto(
             "auto",
@@ -44,6 +46,34 @@ object StrategyProfiles {
             false,
             8,
             0,
+        ),
+        Messaging(
+            "messaging",
+            R.string.strategy_messaging,
+            R.string.strategy_messaging_summary,
+            "disorder",
+            1,
+            false,
+            true,
+            true,
+            8,
+            0,
+            true,
+            1,
+        ),
+        Games(
+            "games",
+            R.string.strategy_games,
+            R.string.strategy_games_summary,
+            "disorder",
+            1,
+            false,
+            false,
+            false,
+            8,
+            0,
+            true,
+            2,
         ),
         Strong(
             "strong",
@@ -78,7 +108,8 @@ object StrategyProfiles {
             .putString("byedpi_fake_offset", profile.fakeOffset.toString())
             .putBoolean("byedpi_desync_http", true)
             .putBoolean("byedpi_desync_https", true)
-            .putBoolean("byedpi_desync_udp", false)
+            .putBoolean("byedpi_desync_udp", profile.desyncUdp)
+            .putString("byedpi_udp_fake_count", profile.udpFakeCount.toString())
             .apply()
     }
 

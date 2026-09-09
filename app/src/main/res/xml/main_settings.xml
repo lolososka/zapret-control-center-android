@@ -35,8 +35,20 @@
             android:defaultValue="false" />
 
         <SwitchPreference
-            android:key="telegram_compat"
-            android:title="@string/telegram_compat"
+            android:key="messaging_compat"
+            android:title="@string/messaging_compat"
+            android:summary="UDP-совместимость включена по умолчанию"
+            android:defaultValue="true" />
+
+    </androidx.preference.PreferenceCategory>
+
+    <androidx.preference.PreferenceCategory
+        android:title="@string/privacy_category">
+
+        <SwitchPreference
+            android:key="privacy_minimal_logs"
+            android:title="@string/privacy_minimal_logs"
+            android:summary="@string/privacy_minimal_logs_summary"
             android:defaultValue="true" />
 
     </androidx.preference.PreferenceCategory>
@@ -72,8 +84,8 @@
         android:title="@string/about_category">
 
         <Preference
-            android:key="engine_attribution"
-            android:title="@string/engine_attribution_title" />
+            android:key="components_attribution"
+            android:title="@string/components_attribution_title" />
 
         <Preference
             android:key="version"
@@ -99,8 +111,8 @@
         </Preference>
 
         <Preference
-            android:key="engine_source_code"
-            android:title="@string/engine_source_code_link">
+            android:key="components_source_code"
+            android:title="@string/components_source_code_link">
             <intent
                 android:action="android.intent.action.VIEW"
                 android:data="https://github.com/hufrea/byedpi" />
