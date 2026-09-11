@@ -29,7 +29,6 @@ Zapret Mobile является форком открытого проекта [B
 Сборка также использует следующие библиотеки из Maven-репозиториев:
 
 - AndroidX Core, Fragment, AppCompat, Preference и Lifecycle — Apache License 2.0;
-- JNA for Android — Apache License 2.0;
 - Material Components for Android — Apache License 2.0;
 - PreferenceX — Apache License 2.0 согласно опубликованным Maven-метаданным;
 - JUnit 4 — Eclipse Public License 1.0;
