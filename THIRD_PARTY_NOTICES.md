@@ -20,6 +20,7 @@ Zapret Mobile является форком открытого проекта [B
 | [lwIP](https://savannah.nongnu.org/projects/lwip/) | `9f5fa882d5a2675aae9907be21b463359ba8b632` | BSD 3-Clause | [`app/src/main/jni/hev-socks5-tunnel/third-part/lwip/License`](app/src/main/jni/hev-socks5-tunnel/third-part/lwip/License) |
 | libyaml (в составе туннеля) | `162227cd7d2b6108bc8bc133273e11413222ddf4` | MIT | [`app/src/main/jni/hev-socks5-tunnel/third-part/yaml/License`](app/src/main/jni/hev-socks5-tunnel/third-part/yaml/License) |
 | KAVL header by Attractive Chaos | включён в ByeDPI | MIT | [`app/src/main/cpp/byedpi/kavl.h`](app/src/main/cpp/byedpi/kavl.h) |
+| [tg-ws-proxy](https://github.com/amurcanov/tg-ws-proxy-android) / Flowseal core | snapshot used by Zapret Mobile 0.2.0 | GPL-3.0 (core derived from MIT Flowseal code) | [`third_party/tg-ws-proxy/LICENSE`](third_party/tg-ws-proxy/LICENSE), [`third_party/tg-ws-proxy/src`](third_party/tg-ws-proxy/src) |
 
 Точные ревизии верхнеуровневых подмодулей закреплены в Git-дереве репозитория. Вложенные ревизии закреплены деревом `hev-socks5-tunnel`.
 
@@ -28,6 +29,7 @@ Zapret Mobile является форком открытого проекта [B
 Сборка также использует следующие библиотеки из Maven-репозиториев:
 
 - AndroidX Core, Fragment, AppCompat, Preference и Lifecycle — Apache License 2.0;
+- JNA for Android — Apache License 2.0;
 - Material Components for Android — Apache License 2.0;
 - PreferenceX — Apache License 2.0 согласно опубликованным Maven-метаданным;
 - JUnit 4 — Eclipse Public License 1.0;

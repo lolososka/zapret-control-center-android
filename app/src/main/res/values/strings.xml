@@ -21,13 +21,17 @@
     <string name="logs_failed">Не удалось собрать журнал</string>
     <string name="proxy_address">%1$s:%2$s</string>
     <string name="telegram_card_title">Telegram</string>
-    <string name="telegram_card_summary">Локальный SOCKS5 · быстрый импорт</string>
+    <string name="telegram_card_summary">Локальный MTProto через WebSocket · без стороннего сервера</string>
     <string name="telegram_proxy_off">ПРОКСИ ВЫКЛЮЧЕН</string>
     <string name="telegram_proxy_ready">ПРОКСИ ДОСТУПЕН</string>
-    <string name="telegram_proxy_address">SOCKS5  %1$s:%2$s</string>
+    <string name="telegram_proxy_address">MTProto WS  %1$s:%2$s</string>
     <string name="telegram_setup">Добавить в Telegram</string>
     <string name="telegram_setup_title">Прокси Telegram</string>
-    <string name="telegram_setup_message">Запустите режим «Локальный прокси», затем нажмите «Добавить в Telegram». Откроется готовая карточка SOCKS5 — останется только подтвердить подключение.\n\nСервер: %1$s\nПорт: %2$s\n\nВ режиме VPN отдельный прокси Telegram обычно не нужен.</string>
+    <string name="telegram_setup_message">Запустите локальный MTProto‑прокси и добавьте его в Telegram. Ссылка содержит локальный адрес и одноразово созданный секрет.</string>
+    <string name="telegram_ws_setup_stopped">MTProto WS выключен. Нажмите «Запустить», затем откройте ссылку в Telegram.\n\n%1$s</string>
+    <string name="telegram_ws_setup_running">MTProto WS работает на 127.0.0.1:1443. Нажмите «Добавить в Telegram» или скопируйте ссылку.\n\n%1$s</string>
+    <string name="telegram_ws_start">Запустить</string>
+    <string name="telegram_ws_stop">Остановить</string>
     <string name="telegram_add_proxy">Добавить в Telegram</string>
     <string name="telegram_copy_proxy">Скопировать адрес</string>
     <string name="telegram_open_app">Открыть Telegram</string>
@@ -38,9 +42,13 @@
     <string name="telegram_proxy_check_failed">Прокси не отвечает. Сначала запустите режим «Локальный прокси».</string>
     <string name="telegram_not_installed">Telegram не найден на устройстве</string>
     <string name="telegram_proxy_invalid">Проверьте порт локального прокси в настройках</string>
-    <string name="telegram_proxy_start_first">Сначала запустите Zapret в режиме «Локальный прокси»</string>
-    <string name="telegram_proxy_opened">Telegram открыл карточку прокси</string>
-    <string name="telegram_proxy_manual_fallback">Автоматическая карточка не открылась. Добавьте SOCKS5 вручную: сервер и порт указаны выше.</string>
+    <string name="telegram_proxy_start_first">Сначала запустите MTProto‑прокси Telegram</string>
+    <string name="telegram_proxy_opened">Telegram открыл карточку MTProto‑прокси</string>
+    <string name="telegram_proxy_manual_fallback">Автоматическая карточка не открылась. Скопируйте ссылку и вставьте её в Telegram.</string>
+    <string name="telegram_ws_channel">Telegram MTProto</string>
+    <string name="telegram_ws_starting">Запускаю Telegram MTProto…</string>
+    <string name="telegram_ws_running">Telegram MTProto работает · 127.0.0.1:1443</string>
+    <string name="telegram_ws_failed">Не удалось запустить Telegram MTProto</string>
 
     <string name="connection_label">Соединение</string>
     <string name="connection_badge">Защита соединения</string>
