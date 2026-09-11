@@ -51,6 +51,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private var metricsJob: Job? = null
     private var pingJob: Job? = null
+    private var strategyProbeJob: Job? = null
     private var connectionStartedAt = 0L
     private var rxBaseline = 0L
     private var txBaseline = 0L
@@ -132,7 +133,15 @@ class MainActivity : AppCompatActivity() {
             restartAfterProfile = false
             if (result.resultCode == RESULT_OK) {
                 updateStatus()
-                if (shouldRestart) {
+                val preferences = getPreferences()
+                val autoProbeRequested =
+                    StrategyProfiles.selected(preferences) == StrategyProfiles.Profile.Auto &&
+                        preferences.mode() == Mode.Proxy
+                if (autoProbeRequested) {
+                    pendingServiceRestart = false
+                    if (appStatus.first == AppStatus.Running) stop()
+                    startAutoStrategyProbe()
+                } else if (shouldRestart) {
                     pendingServiceRestart = true
                     Toast.makeText(
                         this,
@@ -259,6 +268,7 @@ class MainActivity : AppCompatActivity() {
     override fun onDestroy() {
         metricsJob?.cancel()
         pingJob?.cancel()
+        strategyProbeJob?.cancel()
         super.onDestroy()
         unregisterReceiver(receiver)
     }
@@ -342,6 +352,145 @@ class MainActivity : AppCompatActivity() {
         }
 
         logsRegister.launch(intent)
+    }
+
+    private fun startAutoStrategyProbe() {
+        if (strategyProbeJob?.isActive == true) return
+
+        strategyProbeJob = lifecycleScope.launch {
+            Toast.makeText(
+                this@MainActivity,
+                R.string.strategy_auto_checking,
+                Toast.LENGTH_SHORT,
+            ).show()
+
+            if (!waitForStatus(AppStatus.Halted, 4_000L)) {
+                Toast.makeText(
+                    this@MainActivity,
+                    R.string.strategy_auto_waiting,
+                    Toast.LENGTH_LONG,
+                ).show()
+                return@launch
+            }
+
+            val preferences = getPreferences()
+            val proxyIp = preferences.getStringNotNull("byedpi_proxy_ip", "127.0.0.1")
+            val proxyPort = preferences.getStringNotNull("byedpi_proxy_port", "1080")
+            val candidates = listOf(
+                StrategyProfiles.Profile.Messaging,
+                StrategyProfiles.Profile.Balanced,
+                StrategyProfiles.Profile.Strong,
+                StrategyProfiles.Profile.Games,
+            )
+
+            var selected: StrategyProfiles.Profile? = null
+            for (candidate in candidates) {
+                if (!startProxyCandidate(candidate)) continue
+                if (probeTelegramEndpoint(proxyIp, proxyPort)) {
+                    selected = candidate
+                    break
+                }
+            }
+
+            if (selected == null) {
+                val fallback = StrategyProfiles.Profile.Messaging
+                restartProxyCandidate(fallback)
+                Toast.makeText(
+                    this@MainActivity,
+                    R.string.strategy_auto_failed,
+                    Toast.LENGTH_LONG,
+                ).show()
+            } else {
+                StrategyProfiles.apply(preferences, selected)
+                Toast.makeText(
+                    this@MainActivity,
+                    getString(R.string.strategy_auto_selected, getString(selected.title)),
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+            updateStatus()
+        }
+    }
+
+    private suspend fun startProxyCandidate(profile: StrategyProfiles.Profile): Boolean {
+        val preferences = getPreferences()
+        StrategyProfiles.apply(preferences, profile)
+        if (appStatus.first == AppStatus.Running) {
+            ServiceManager.stop(this)
+            if (!waitForStatus(AppStatus.Halted, 4_000L)) return false
+        }
+        ServiceManager.start(this, Mode.Proxy)
+        return waitForStatus(AppStatus.Running, 5_000L)
+    }
+
+    private suspend fun restartProxyCandidate(profile: StrategyProfiles.Profile) {
+        startProxyCandidate(profile)
+    }
+
+    private suspend fun waitForStatus(target: AppStatus, timeoutMs: Long): Boolean {
+        val deadline = SystemClock.elapsedRealtime() + timeoutMs
+        while (SystemClock.elapsedRealtime() < deadline) {
+            if (appStatus.first == target) return true
+            delay(100L)
+        }
+        return appStatus.first == target
+    }
+
+    private suspend fun probeTelegramEndpoint(proxyIp: String, proxyPort: String): Boolean =
+        withContext(Dispatchers.IO) {
+            val port = proxyPort.toIntOrNull() ?: return@withContext false
+            listOf("telegram.org", "api.telegram.org").any { host ->
+                try {
+                    Socket().use { socket ->
+                        socket.soTimeout = 2_000
+                        socket.connect(InetSocketAddress(proxyIp, port), 2_000)
+                        val input = socket.getInputStream()
+                        val output = socket.getOutputStream()
+
+                        output.write(byteArrayOf(0x05, 0x01, 0x00))
+                        output.flush()
+                        val greeting = ByteArray(2)
+                        if (!readFully(input, greeting) ||
+                            greeting[0] != 0x05.toByte() ||
+                            greeting[1] != 0x00.toByte()
+                        ) {
+                            return@use false
+                        }
+
+                        val hostBytes = host.toByteArray(Charsets.US_ASCII)
+                        val request = ByteArray(7 + hostBytes.size)
+                        request[0] = 0x05
+                        request[1] = 0x01
+                        request[2] = 0x00
+                        request[3] = 0x03
+                        request[4] = hostBytes.size.toByte()
+                        hostBytes.copyInto(request, destinationOffset = 5)
+                        request[5 + hostBytes.size] = 0x01
+                        request[6 + hostBytes.size] = 0xBB.toByte()
+                        output.write(request)
+                        output.flush()
+
+                        val response = ByteArray(4)
+                        readFully(input, response) &&
+                            response[0] == 0x05.toByte() &&
+                            response[1] == 0x00.toByte()
+                    }
+                } catch (_: IOException) {
+                    false
+                } catch (_: SecurityException) {
+                    false
+                }
+            }
+        }
+
+    private fun readFully(input: java.io.InputStream, buffer: ByteArray): Boolean {
+        var offset = 0
+        while (offset < buffer.size) {
+            val read = input.read(buffer, offset, buffer.size - offset)
+            if (read < 0) return false
+            offset += read
+        }
+        return true
     }
 
     private fun showTelegramSetup() {
