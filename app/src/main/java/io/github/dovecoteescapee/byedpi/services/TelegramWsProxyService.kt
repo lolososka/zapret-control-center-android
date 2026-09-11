@@ -115,7 +115,8 @@ class TelegramWsProxyService : Service() {
         scope.launch {
             runCatching { TelegramWsProxy.stop() }
             _running.value = false
-            stopForeground(STOP_FOREGROUND_REMOVE)
+            @Suppress("DEPRECATION")
+            stopForeground(true)
             stopSelf()
         }
     }
