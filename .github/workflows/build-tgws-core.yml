@@ -53,8 +53,8 @@ jobs:
             --release --target armv7-linux-androideabi
 
           mkdir -p dist/arm64-v8a dist/armeabi-v7a
-          cp target/aarch64-linux-android/release/libtgwsproxy.so dist/arm64-v8a/
-          cp target/armv7-linux-androideabi/release/libtgwsproxy.so dist/armeabi-v7a/
+          cp third_party/tg-ws-proxy/target/aarch64-linux-android/release/libtgwsproxy.so dist/arm64-v8a/
+          cp third_party/tg-ws-proxy/target/armv7-linux-androideabi/release/libtgwsproxy.so dist/armeabi-v7a/
 
           objdump="$toolchain/llvm-objdump"
           for library in dist/*/libtgwsproxy.so; do
