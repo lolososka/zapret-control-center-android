@@ -59,6 +59,10 @@ android {
         viewBinding = true
     }
     sourceSets["main"].assets.srcDir(layout.buildDirectory.dir("generated/licenseAssets"))
+    // The legacy ndk-build task regenerates src/main/jniLibs. Keep the
+    // Telegram Rust core in a separate, stable directory so CMake can import
+    // it before ndk-build output is produced.
+    sourceSets["main"].jniLibs.srcDir("src/main/tgwsLibs")
 
     // https://android.izzysoft.de/articles/named/iod-scan-apkchecks?lang=en#blobs
     dependenciesInfo {

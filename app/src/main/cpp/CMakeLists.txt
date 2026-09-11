@@ -21,7 +21,7 @@ target_link_libraries(byedpi PRIVATE android log)
 # the existing ByeDPI native library.
 add_library(tgwsproxy SHARED IMPORTED)
 set_target_properties(tgwsproxy PROPERTIES
-        IMPORTED_LOCATION "${CMAKE_CURRENT_SOURCE_DIR}/../jniLibs/${ANDROID_ABI}/libtgwsproxy.so")
+        IMPORTED_LOCATION "${CMAKE_CURRENT_SOURCE_DIR}/../tgwsLibs/${ANDROID_ABI}/libtgwsproxy.so")
 add_library(tgwsbridge SHARED telegram-ws-jni.c)
 target_link_options(tgwsbridge PRIVATE
         "-Wl,-z,max-page-size=16384"
