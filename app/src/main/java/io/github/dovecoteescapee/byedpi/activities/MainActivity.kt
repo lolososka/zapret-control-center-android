@@ -53,6 +53,7 @@ class MainActivity : AppCompatActivity() {
     private var metricsJob: Job? = null
     private var pingJob: Job? = null
     private var strategyProbeJob: Job? = null
+    private var telegramStartJob: Job? = null
     private var connectionStartedAt = 0L
     private var rxBaseline = 0L
     private var txBaseline = 0L
@@ -270,6 +271,7 @@ class MainActivity : AppCompatActivity() {
         metricsJob?.cancel()
         pingJob?.cancel()
         strategyProbeJob?.cancel()
+        telegramStartJob?.cancel()
         super.onDestroy()
         unregisterReceiver(receiver)
     }
@@ -513,11 +515,37 @@ class MainActivity : AppCompatActivity() {
                 if (running) {
                     openTelegramProxyLink(link)
                 } else {
-                    TelegramWsProxyService.start(this)
-                    Toast.makeText(this, R.string.telegram_ws_starting, Toast.LENGTH_SHORT).show()
+                    startTelegramAndApply(link)
                 }
             }
             .show()
+    }
+
+    private fun startTelegramAndApply(link: String) {
+        try {
+            TelegramWsProxyService.start(this)
+        } catch (error: RuntimeException) {
+            Log.e(TAG, "Failed to start Telegram proxy service", error)
+            Toast.makeText(this, R.string.telegram_ws_failed, Toast.LENGTH_LONG).show()
+            updateStatus()
+            return
+        }
+
+        Toast.makeText(this, R.string.telegram_ws_starting, Toast.LENGTH_SHORT).show()
+        telegramStartJob?.cancel()
+        telegramStartJob = lifecycleScope.launch {
+            if (TelegramWsProxyService.awaitReady()) {
+                updateStatus()
+                openTelegramProxyLink(link)
+            } else {
+                updateStatus()
+                Toast.makeText(
+                    this@MainActivity,
+                    R.string.telegram_ws_failed,
+                    Toast.LENGTH_LONG,
+                ).show()
+            }
+        }
     }
 
     private fun telegramProxyLink(): String {
@@ -551,28 +579,41 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun openTelegramProxyLink(link: String) {
-        val uri = Uri.parse(link)
+        val httpsUri = Uri.parse(link)
+        val tgUri = Uri.Builder()
+            .scheme("tg")
+            .authority("proxy")
+            .appendQueryParameter("server", httpsUri.getQueryParameter("server") ?: "127.0.0.1")
+            .appendQueryParameter("port", httpsUri.getQueryParameter("port") ?: "1443")
+            .appendQueryParameter("secret", httpsUri.getQueryParameter("secret") ?: "")
+            .build()
         val packageCandidates = listOf(
             "org.telegram.messenger",
             "org.telegram.messenger.web",
             "org.thunderdog.challegram",
         )
-        for (packageName in packageCandidates) {
-            val intent = Intent(Intent.ACTION_VIEW, uri).setPackage(packageName)
-            if (packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY) != null) {
-                startActivity(intent)
-                Toast.makeText(this, R.string.telegram_proxy_opened, Toast.LENGTH_SHORT).show()
-                return
+        for (uri in listOf(tgUri, httpsUri)) {
+            for (packageName in packageCandidates) {
+                val intent = Intent(Intent.ACTION_VIEW, uri).setPackage(packageName)
+                if (packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY) != null) {
+                    runCatching { startActivity(intent) }.onSuccess {
+                        Toast.makeText(this, R.string.telegram_proxy_opened, Toast.LENGTH_SHORT).show()
+                    }
+                    return
+                }
             }
         }
 
         // A small number of Telegram builds do not expose package metadata to
-        // queries. Keep a generic fallback before showing the manual path.
-        val genericIntent = Intent(Intent.ACTION_VIEW, uri)
-        if (packageManager.resolveActivity(genericIntent, PackageManager.MATCH_DEFAULT_ONLY) != null) {
-            startActivity(genericIntent)
-            Toast.makeText(this, R.string.telegram_proxy_opened, Toast.LENGTH_SHORT).show()
-            return
+        // queries. Try the Telegram deep link before falling back to HTTPS.
+        for (uri in listOf(tgUri, httpsUri)) {
+            val genericIntent = Intent(Intent.ACTION_VIEW, uri)
+            if (packageManager.resolveActivity(genericIntent, PackageManager.MATCH_DEFAULT_ONLY) != null) {
+                runCatching { startActivity(genericIntent) }.onSuccess {
+                    Toast.makeText(this, R.string.telegram_proxy_opened, Toast.LENGTH_SHORT).show()
+                }
+                return
+            }
         }
 
         openTelegram()
@@ -591,10 +632,10 @@ class MainActivity : AppCompatActivity() {
         binding.proxyAddress.text = getString(R.string.proxy_address, proxyIp, proxyPort)
         binding.telegramProxyAddress.text = getString(R.string.telegram_proxy_address, "127.0.0.1", "1443")
         binding.telegramProxyStatus.setText(
-            if (TelegramWsProxyService.running.value) {
-                R.string.telegram_proxy_ready
-            } else {
-                R.string.telegram_proxy_off
+            when {
+                TelegramWsProxyService.running.value -> R.string.telegram_proxy_ready
+                TelegramWsProxyService.starting.value -> R.string.telegram_proxy_starting
+                else -> R.string.telegram_proxy_off
             }
         )
         binding.modeValue.setText(
