@@ -60,7 +60,7 @@ jobs:
           for library in dist/*/libtgwsproxy.so; do
             echo "--- $library ---"
             "$objdump" -p "$library" | awk '$1 == "LOAD" { print $NF }'
-            if "$objdump" -p "$library" | awk '$1 == "LOAD" { value=$NF; sub(/^2\\*\\*/, "", value); if (value < 14) bad=1 } END { exit bad }'; then
+            if "$objdump" -p "$library" | awk '$1 == "LOAD" { value=$NF; sub(/^2\*\*/, "", value); if (value < 14) bad=1 } END { exit bad }'; then
               :
             else
               echo "Library is not 16 KB aligned: $library" >&2
