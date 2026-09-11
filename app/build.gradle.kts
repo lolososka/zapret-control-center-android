@@ -14,8 +14,8 @@ android {
         applicationId = "io.github.lolososka.zapretmobile"
         minSdk = 21
         targetSdk = 34
-        versionCode = 14
-        versionName = "0.2.3"
+        versionCode = 15
+        versionName = "0.2.4"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

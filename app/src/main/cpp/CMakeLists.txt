@@ -27,6 +27,9 @@ if(ANDROID_ABI STREQUAL "arm64-v8a" OR ANDROID_ABI STREQUAL "armeabi-v7a")
             IMPORTED_LOCATION "${CMAKE_CURRENT_SOURCE_DIR}/../tgwsLibs/${ANDROID_ABI}/libtgwsproxy.so")
 else()
     add_library(tgwsproxy SHARED telegram-ws-stub.c)
+    target_link_options(tgwsproxy PRIVATE
+            "-Wl,-z,max-page-size=16384"
+            "-Wl,-z,common-page-size=16384")
     target_link_libraries(tgwsproxy PRIVATE log)
 endif()
 add_library(tgwsbridge SHARED telegram-ws-jni.c)
