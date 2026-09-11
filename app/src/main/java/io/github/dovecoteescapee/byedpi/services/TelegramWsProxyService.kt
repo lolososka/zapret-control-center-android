@@ -5,6 +5,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
@@ -129,7 +130,7 @@ class TelegramWsProxyService : Service() {
 
     private fun createChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            getSystemService(NotificationManager::class.java).createNotificationChannel(
+            notificationManager().createNotificationChannel(
                 NotificationChannel(CHANNEL_ID, getString(R.string.telegram_ws_channel), NotificationManager.IMPORTANCE_LOW)
             )
         }
@@ -150,8 +151,11 @@ class TelegramWsProxyService : Service() {
     }
 
     private fun updateNotification(text: String) {
-        getSystemService(NotificationManager::class.java).notify(NOTIFICATION_ID, notification(text))
+        notificationManager().notify(NOTIFICATION_ID, notification(text))
     }
+
+    private fun notificationManager(): NotificationManager =
+        getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
     override fun onDestroy() {
         if (_running.value) runCatching { TelegramWsProxy.stop() }
