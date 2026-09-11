@@ -596,10 +596,11 @@ class MainActivity : AppCompatActivity() {
             for (packageName in packageCandidates) {
                 val intent = Intent(Intent.ACTION_VIEW, uri).setPackage(packageName)
                 if (packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY) != null) {
-                    runCatching { startActivity(intent) }.onSuccess {
+                    val launched = runCatching { startActivity(intent) }.isSuccess
+                    if (launched) {
                         Toast.makeText(this, R.string.telegram_proxy_opened, Toast.LENGTH_SHORT).show()
+                        return
                     }
-                    return
                 }
             }
         }
@@ -609,10 +610,11 @@ class MainActivity : AppCompatActivity() {
         for (uri in listOf(tgUri, httpsUri)) {
             val genericIntent = Intent(Intent.ACTION_VIEW, uri)
             if (packageManager.resolveActivity(genericIntent, PackageManager.MATCH_DEFAULT_ONLY) != null) {
-                runCatching { startActivity(genericIntent) }.onSuccess {
+                val launched = runCatching { startActivity(genericIntent) }.isSuccess
+                if (launched) {
                     Toast.makeText(this, R.string.telegram_proxy_opened, Toast.LENGTH_SHORT).show()
+                    return
                 }
-                return
             }
         }
 
