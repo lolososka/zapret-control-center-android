@@ -16,12 +16,19 @@ target_link_options(byedpi PRIVATE
 
 target_link_libraries(byedpi PRIVATE android log)
 
-# The MTProto/WebSocket core is shipped as a separate Rust shared library.
-# Keep the JNI bridge separate so the core can be updated without touching
-# the existing ByeDPI native library.
-add_library(tgwsproxy SHARED IMPORTED)
-set_target_properties(tgwsproxy PROPERTIES
-        IMPORTED_LOCATION "${CMAKE_CURRENT_SOURCE_DIR}/../tgwsLibs/${ANDROID_ABI}/libtgwsproxy.so")
+# The MTProto/WebSocket core is shipped as a separate Rust shared library for
+# the ARM ABIs used by physical Android phones. CI also builds an x86_64
+# emulator; use a small unsupported-platform stub there so the rest of the UI
+# and tests remain installable without pretending that Telegram proxying works
+# on an ABI for which the Rust core is not shipped.
+if(ANDROID_ABI STREQUAL "arm64-v8a" OR ANDROID_ABI STREQUAL "armeabi-v7a")
+    add_library(tgwsproxy SHARED IMPORTED)
+    set_target_properties(tgwsproxy PROPERTIES
+            IMPORTED_LOCATION "${CMAKE_CURRENT_SOURCE_DIR}/../tgwsLibs/${ANDROID_ABI}/libtgwsproxy.so")
+else()
+    add_library(tgwsproxy SHARED telegram-ws-stub.c)
+    target_link_libraries(tgwsproxy PRIVATE log)
+endif()
 add_library(tgwsbridge SHARED telegram-ws-jni.c)
 target_link_options(tgwsbridge PRIVATE
         "-Wl,-z,max-page-size=16384"
