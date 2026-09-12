@@ -34,12 +34,6 @@
             android:title="@string/ipv6_setting"
             android:defaultValue="false" />
 
-        <SwitchPreference
-            android:key="messaging_compat"
-            android:title="@string/messaging_compat"
-            android:summary="UDP-совместимость включена по умолчанию"
-            android:defaultValue="true" />
-
     </androidx.preference.PreferenceCategory>
 
     <androidx.preference.PreferenceCategory

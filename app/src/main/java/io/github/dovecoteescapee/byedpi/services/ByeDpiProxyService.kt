@@ -10,6 +10,9 @@ import androidx.lifecycle.LifecycleService
 import io.github.dovecoteescapee.byedpi.R
 import io.github.dovecoteescapee.byedpi.core.ByeDpiProxy
 import io.github.dovecoteescapee.byedpi.core.ByeDpiProxyPreferences
+import io.github.dovecoteescapee.byedpi.core.ByeDpiProxyUIPreferences
+import io.github.dovecoteescapee.byedpi.core.ConnectionDiagnostics
+import io.github.dovecoteescapee.byedpi.core.Socks5Health
 import io.github.dovecoteescapee.byedpi.data.*
 import io.github.dovecoteescapee.byedpi.utility.*
 import kotlinx.coroutines.Dispatchers
@@ -117,10 +120,12 @@ class ByeDpiProxyService : LifecycleService() {
             mutex.withLock {
                 if (destroyed || status == ServiceStatus.Connected) return
                 startProxy()
+                ConnectionDiagnostics.clear(this@ByeDpiProxyService)
                 updateStatus(ServiceStatus.Connected)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start proxy", e)
+            ConnectionDiagnostics.record(this, "Local proxy", e)
             stop(ServiceStatus.Failed)
         }
     }
@@ -186,9 +191,21 @@ class ByeDpiProxyService : LifecycleService() {
             withContext(Dispatchers.Main) {
                 if (!stopping && !destroyed && proxySession === session) {
                     Log.e(TAG, "Proxy exited unexpectedly with code $code")
+                    ConnectionDiagnostics.record(
+                        this@ByeDpiProxyService,
+                        "ByeDPI",
+                        "native loop exited with code $code",
+                    )
                     serviceScope.launch { stop(ServiceStatus.Failed, session) }
                 }
             }
+        }
+
+
+        if (preferences is ByeDpiProxyUIPreferences &&
+            !Socks5Health.awaitReady(preferences.ip, preferences.port)
+        ) {
+            throw IllegalStateException("Native SOCKS5 proxy did not become ready")
         }
 
         Log.i(TAG, "Proxy started")

@@ -104,11 +104,7 @@ class ByeDpiProxyUIPreferences(
         noDomain = preferences.getBoolean("byedpi_no_domain", false),
         desyncHttp = preferences.getBoolean("byedpi_desync_http", true),
         desyncHttps = preferences.getBoolean("byedpi_desync_https", true),
-        desyncUdp = preferences.getBoolean("byedpi_desync_udp", false) ||
-            preferences.getBoolean(
-                "messaging_compat",
-                preferences.getBoolean("telegram_compat", true),
-            ),
+        desyncUdp = preferences.getBoolean("byedpi_desync_udp", false),
         desyncMethod = preferences.getString("byedpi_desync_method", null)
             ?.let { DesyncMethod.fromName(it) },
         splitPosition = preferences.getString("byedpi_split_position", null)?.toIntOrNull(),
@@ -133,11 +129,7 @@ class ByeDpiProxyUIPreferences(
             }
         },
         tcpFastOpen = preferences.getBoolean("byedpi_tcp_fast_open", false),
-        udpFakeCount = preferences.getString("byedpi_udp_fake_count", null)?.toIntOrNull()
-            ?: if (preferences.getBoolean(
-                "messaging_compat",
-                preferences.getBoolean("telegram_compat", true),
-            )) 1 else 0,
+        udpFakeCount = preferences.getString("byedpi_udp_fake_count", null)?.toIntOrNull(),
         dropSack = preferences.getBoolean("byedpi_drop_sack", false),
         byedpiFakeOffset = preferences.getString("byedpi_fake_offset", null)?.toIntOrNull(),
     )

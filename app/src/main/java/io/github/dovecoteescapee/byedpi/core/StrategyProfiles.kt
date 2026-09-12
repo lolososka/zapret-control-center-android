@@ -110,6 +110,8 @@ object StrategyProfiles {
             .putBoolean("byedpi_desync_https", true)
             .putBoolean("byedpi_desync_udp", profile.desyncUdp)
             .putString("byedpi_udp_fake_count", profile.udpFakeCount.toString())
+            .remove("messaging_compat")
+            .remove("telegram_compat")
             .apply()
     }
 

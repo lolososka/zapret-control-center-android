@@ -33,6 +33,9 @@ import io.github.dovecoteescapee.byedpi.data.*
 import io.github.dovecoteescapee.byedpi.fragments.MainSettingsFragment
 import io.github.dovecoteescapee.byedpi.databinding.ActivityMainBinding
 import io.github.dovecoteescapee.byedpi.core.StrategyProfiles
+import io.github.dovecoteescapee.byedpi.core.ByeDpiProxyPreferences
+import io.github.dovecoteescapee.byedpi.core.ByeDpiProxyUIPreferences
+import io.github.dovecoteescapee.byedpi.core.ConnectionDiagnostics
 import io.github.dovecoteescapee.byedpi.services.ServiceManager
 import io.github.dovecoteescapee.byedpi.services.TelegramWsProxyService
 import io.github.dovecoteescapee.byedpi.services.appStatus
@@ -47,6 +50,8 @@ import java.io.IOException
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.util.Locale
+import javax.net.ssl.SSLSocket
+import javax.net.ssl.SSLSocketFactory
 
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
@@ -69,22 +74,53 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private val TAG: String = MainActivity::class.java.simpleName
+        private val PROBE_HOSTS = listOf("discord.com", "www.youtube.com", "telegram.org")
+    }
 
-        private fun collectLogs(minimal: Boolean): String? =
-            try {
-                if (minimal) {
-                    "Zapret Mobile ${BuildConfig.VERSION_NAME}\n" +
-                        "Краткая диагностика: системный журнал не экспортирован.\n"
-                } else {
-                    Runtime.getRuntime()
-                        .exec("logcat *:D -d")
-                        .inputStream.bufferedReader()
-                        .use { it.readText() }
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to collect logs", e)
-                null
+    private fun collectLogs(minimal: Boolean): String? = try {
+        val preferences = getPreferences()
+        val config = runCatching {
+            when (val proxyPreferences = ByeDpiProxyPreferences.fromSharedPreferences(preferences)) {
+                is ByeDpiProxyUIPreferences ->
+                    "listen=${proxyPreferences.ip}:${proxyPreferences.port}, " +
+                        "method=${proxyPreferences.desyncMethod.name.lowercase(Locale.ROOT)}, " +
+                        "split=${proxyPreferences.splitPosition}, " +
+                        "tlsrec=${proxyPreferences.tlsRecordSplit}, " +
+                        "udp=${proxyPreferences.desyncUdp}/${proxyPreferences.udpFakeCount}"
+                else -> "custom command line enabled (arguments omitted)"
             }
+        }.getOrElse { "invalid settings: ${it.message ?: it.javaClass.simpleName}" }
+        val configuredMode = runCatching { preferences.mode() }.getOrElse { Mode.VPN }
+        val report = StringBuilder()
+            .appendLine("Zapret Mobile ${BuildConfig.VERSION_NAME}")
+            .appendLine("Android ${Build.VERSION.SDK_INT} · ${Build.MANUFACTURER} ${Build.MODEL}")
+            .appendLine("Status: ${appStatus.first} · mode=$configuredMode")
+            .appendLine("Strategy: ${StrategyProfiles.selected(preferences).id}")
+            .appendLine("Config: $config")
+            .appendLine(
+                "Telegram proxy: running=${TelegramWsProxyService.running.value}, " +
+                    "starting=${TelegramWsProxyService.starting.value}",
+            )
+            .appendLine("Last failure: ${ConnectionDiagnostics.lastFailure(this) ?: "none"}")
+
+        if (minimal) {
+            report.appendLine("Application log: omitted by privacy setting")
+        } else {
+            val command = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                arrayOf("logcat", "--pid=${android.os.Process.myPid()}", "-d", "-v", "threadtime")
+            } else {
+                arrayOf("logcat", "-d", "-v", "threadtime")
+            }
+            val applicationLog = Runtime.getRuntime()
+                .exec(command)
+                .inputStream.bufferedReader()
+                .use { it.readText() }
+            report.appendLine().appendLine("Application log:").append(applicationLog)
+        }
+        report.toString()
+    } catch (e: Exception) {
+        Log.e(TAG, "Failed to collect logs", e)
+        null
     }
 
     private val vpnRegister =
@@ -137,12 +173,12 @@ class MainActivity : AppCompatActivity() {
                 updateStatus()
                 val preferences = getPreferences()
                 val autoProbeRequested =
-                    StrategyProfiles.selected(preferences) == StrategyProfiles.Profile.Auto &&
-                        preferences.mode() == Mode.Proxy
+                    StrategyProfiles.selected(preferences) == StrategyProfiles.Profile.Auto
                 if (autoProbeRequested) {
+                    val targetMode = preferences.mode()
                     pendingServiceRestart = false
                     if (appStatus.first == AppStatus.Running) stop()
-                    startAutoStrategyProbe()
+                    startAutoStrategyProbe(targetMode)
                 } else if (shouldRestart) {
                     pendingServiceRestart = true
                     Toast.makeText(
@@ -357,7 +393,7 @@ class MainActivity : AppCompatActivity() {
         logsRegister.launch(intent)
     }
 
-    private fun startAutoStrategyProbe() {
+    private fun startAutoStrategyProbe(targetMode: Mode) {
         if (strategyProbeJob?.isActive == true) return
 
         strategyProbeJob = lifecycleScope.launch {
@@ -377,39 +413,72 @@ class MainActivity : AppCompatActivity() {
             }
 
             val preferences = getPreferences()
-            val proxyIp = preferences.getStringNotNull("byedpi_proxy_ip", "127.0.0.1")
+            val configuredProxyIp = preferences.getStringNotNull("byedpi_proxy_ip", "127.0.0.1")
+            val proxyIp = when (configuredProxyIp.trim()) {
+                "", "0.0.0.0" -> "127.0.0.1"
+                "::", "[::]" -> "::1"
+                else -> configuredProxyIp.trim()
+            }
             val proxyPort = preferences.getStringNotNull("byedpi_proxy_port", "1080")
             val candidates = listOf(
-                StrategyProfiles.Profile.Messaging,
                 StrategyProfiles.Profile.Balanced,
                 StrategyProfiles.Profile.Strong,
+                StrategyProfiles.Profile.Messaging,
                 StrategyProfiles.Profile.Games,
             )
 
             var selected: StrategyProfiles.Profile? = null
+            var bestScore = 0
             for (candidate in candidates) {
                 if (!startProxyCandidate(candidate)) continue
-                if (probeTelegramEndpoint(proxyIp, proxyPort)) {
+                val score = probeBlockedEndpoints(proxyIp, proxyPort)
+                if (score > bestScore) {
+                    bestScore = score
                     selected = candidate
-                    break
                 }
+                if (score == PROBE_HOSTS.size) break
+            }
+
+            val chosen = selected ?: StrategyProfiles.Profile.Balanced
+            if (!restartProxyCandidate(chosen)) {
+                Toast.makeText(
+                    this@MainActivity,
+                    R.string.strategy_auto_waiting,
+                    Toast.LENGTH_LONG,
+                ).show()
+                return@launch
             }
 
             if (selected == null) {
-                val fallback = StrategyProfiles.Profile.Messaging
-                restartProxyCandidate(fallback)
                 Toast.makeText(
                     this@MainActivity,
                     R.string.strategy_auto_failed,
                     Toast.LENGTH_LONG,
                 ).show()
             } else {
-                StrategyProfiles.apply(preferences, selected)
                 Toast.makeText(
                     this@MainActivity,
-                    getString(R.string.strategy_auto_selected, getString(selected.title)),
+                    getString(R.string.strategy_auto_selected, getString(chosen.title)),
                     Toast.LENGTH_LONG,
                 ).show()
+            }
+
+            if (targetMode == Mode.VPN) {
+                if (appStatus.first == AppStatus.Running) {
+                    ServiceManager.stop(this@MainActivity)
+                    if (!waitForStatus(AppStatus.Halted, 4_000L)) {
+                        Toast.makeText(
+                            this@MainActivity,
+                            R.string.strategy_auto_waiting,
+                            Toast.LENGTH_LONG,
+                        ).show()
+                        return@launch
+                    }
+                }
+                preferences.edit().putString("byedpi_mode", "vpn").apply()
+                start()
+            } else {
+                preferences.edit().putString("byedpi_mode", "proxy").apply()
             }
             updateStatus()
         }
@@ -426,9 +495,8 @@ class MainActivity : AppCompatActivity() {
         return waitForStatus(AppStatus.Running, 5_000L)
     }
 
-    private suspend fun restartProxyCandidate(profile: StrategyProfiles.Profile) {
+    private suspend fun restartProxyCandidate(profile: StrategyProfiles.Profile): Boolean =
         startProxyCandidate(profile)
-    }
 
     private suspend fun waitForStatus(target: AppStatus, timeoutMs: Long): Boolean {
         val deadline = SystemClock.elapsedRealtime() + timeoutMs
@@ -439,14 +507,14 @@ class MainActivity : AppCompatActivity() {
         return appStatus.first == target
     }
 
-    private suspend fun probeTelegramEndpoint(proxyIp: String, proxyPort: String): Boolean =
+    private suspend fun probeBlockedEndpoints(proxyIp: String, proxyPort: String): Int =
         withContext(Dispatchers.IO) {
-            val port = proxyPort.toIntOrNull() ?: return@withContext false
-            listOf("telegram.org", "api.telegram.org").any { host ->
+            val port = proxyPort.toIntOrNull() ?: return@withContext 0
+            PROBE_HOSTS.count { host ->
                 try {
                     Socket().use { socket ->
-                        socket.soTimeout = 2_000
-                        socket.connect(InetSocketAddress(proxyIp, port), 2_000)
+                        socket.soTimeout = 3_500
+                        socket.connect(InetSocketAddress(proxyIp, port), 2_500)
                         val input = socket.getInputStream()
                         val output = socket.getOutputStream()
 
@@ -474,9 +542,21 @@ class MainActivity : AppCompatActivity() {
                         output.flush()
 
                         val response = ByteArray(4)
-                        readFully(input, response) &&
-                            response[0] == 0x05.toByte() &&
-                            response[1] == 0x00.toByte()
+                        if (!readFully(input, response) ||
+                            response[0] != 0x05.toByte() ||
+                            response[1] != 0x00.toByte() ||
+                            !consumeSocksAddress(input, response[3])
+                        ) {
+                            return@use false
+                        }
+
+                        val tls = SSLSocketFactory.getDefault()
+                            .createSocket(socket, host, 443, false) as SSLSocket
+                        tls.use {
+                            it.soTimeout = 3_500
+                            it.startHandshake()
+                            it.session.isValid
+                        }
                     }
                 } catch (_: IOException) {
                     false
@@ -485,6 +565,20 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+
+    private fun consumeSocksAddress(input: java.io.InputStream, type: Byte): Boolean {
+        val addressLength = when (type.toInt() and 0xff) {
+            0x01 -> 4
+            0x04 -> 16
+            0x03 -> {
+                val length = input.read()
+                if (length < 0) return false
+                length
+            }
+            else -> return false
+        }
+        return readFully(input, ByteArray(addressLength + 2))
+    }
 
     private fun readFully(input: java.io.InputStream, buffer: ByteArray): Boolean {
         var offset = 0

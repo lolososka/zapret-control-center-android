@@ -151,8 +151,8 @@
     <string name="strategy_messaging_summary">Надёжнее для чатов и звонков</string>
     <string name="strategy_games">Игровой трафик</string>
     <string name="strategy_games_summary">Мягкая обработка UDP</string>
-    <string name="strategy_auto_checking">Подбираю профиль для Telegram…</string>
+    <string name="strategy_auto_checking">Проверяю стратегии соединения…</string>
     <string name="strategy_auto_waiting">Не удалось дождаться остановки прокси. Попробуйте ещё раз.</string>
     <string name="strategy_auto_selected">Выбран профиль «%1$s»</string>
-    <string name="strategy_auto_failed">Профили не прошли проверку. Оставил профиль «Мессенджеры».</string>
+    <string name="strategy_auto_failed">Сеть не ответила на проверку. Оставил профиль «Баланс».</string>
 </resources>

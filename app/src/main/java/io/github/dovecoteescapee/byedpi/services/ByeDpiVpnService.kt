@@ -12,6 +12,9 @@ import io.github.dovecoteescapee.byedpi.R
 import io.github.dovecoteescapee.byedpi.activities.MainActivity
 import io.github.dovecoteescapee.byedpi.core.ByeDpiProxy
 import io.github.dovecoteescapee.byedpi.core.ByeDpiProxyPreferences
+import io.github.dovecoteescapee.byedpi.core.ByeDpiProxyUIPreferences
+import io.github.dovecoteescapee.byedpi.core.ConnectionDiagnostics
+import io.github.dovecoteescapee.byedpi.core.Socks5Health
 import io.github.dovecoteescapee.byedpi.core.TProxyService
 import io.github.dovecoteescapee.byedpi.data.*
 import io.github.dovecoteescapee.byedpi.utility.*
@@ -130,10 +133,12 @@ class ByeDpiVpnService : LifecycleVpnService() {
                 if (destroyed || status == ServiceStatus.Connected) return
                 startProxy()
                 startTun2Socks()
+                ConnectionDiagnostics.clear(this@ByeDpiVpnService)
                 updateStatus(ServiceStatus.Connected)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start VPN", e)
+            ConnectionDiagnostics.record(this, "VPN", e)
             stop(ServiceStatus.Failed)
         }
     }
@@ -205,11 +210,22 @@ class ByeDpiVpnService : LifecycleVpnService() {
             withContext(Dispatchers.Main) {
                 if (!stopping && !destroyed && proxySession === session) {
                     Log.e(TAG, "Proxy exited unexpectedly with code $code")
+                    ConnectionDiagnostics.record(
+                        this@ByeDpiVpnService,
+                        "ByeDPI",
+                        "native loop exited with code $code",
+                    )
                     // Run teardown in a different coroutine. Calling stop() from
                     // proxyJob itself would make stopProxy() join the current job.
                     serviceScope.launch { stop(ServiceStatus.Failed, session) }
                 }
             }
+        }
+
+        if (preferences is ByeDpiProxyUIPreferences &&
+            !Socks5Health.awaitReady(preferences.ip, preferences.port)
+        ) {
+            throw IllegalStateException("Native SOCKS5 proxy did not become ready")
         }
 
         Log.i(TAG, "Proxy started")

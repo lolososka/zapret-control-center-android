@@ -16,6 +16,7 @@ import androidx.core.content.ContextCompat
 import io.github.dovecoteescapee.byedpi.R
 import io.github.dovecoteescapee.byedpi.activities.MainActivity
 import io.github.dovecoteescapee.byedpi.core.TelegramWsProxy
+import io.github.dovecoteescapee.byedpi.core.ConnectionDiagnostics
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -125,11 +126,17 @@ class TelegramWsProxyService : Service() {
                 )
                 val result = TelegramWsProxy.start("127.0.0.1", 1443, "", secret)
                 if (result == 0 && waitForPort()) {
+                    ConnectionDiagnostics.clear(this@TelegramWsProxyService)
                     _running.value = true
                     _starting.value = false
                     updateNotification(getString(R.string.telegram_ws_running))
                 } else {
                     Log.e("TelegramWsProxy", "StartProxy returned $result")
+                    ConnectionDiagnostics.record(
+                        this@TelegramWsProxyService,
+                        "Telegram MTProto",
+                        "native start returned $result",
+                    )
                     if (result == 0) runCatching { TelegramWsProxy.stop() }
                     _running.value = false
                     _starting.value = false
@@ -138,6 +145,7 @@ class TelegramWsProxyService : Service() {
                 }
             } catch (error: Throwable) {
                 Log.e("TelegramWsProxy", "Failed to start MTProto proxy", error)
+                ConnectionDiagnostics.record(this@TelegramWsProxyService, "Telegram MTProto", error)
                 _running.value = false
                 _starting.value = false
                 updateNotification(getString(R.string.telegram_ws_failed))
