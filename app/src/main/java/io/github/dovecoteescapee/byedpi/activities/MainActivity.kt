@@ -550,8 +550,8 @@ class MainActivity : AppCompatActivity() {
                             return@use false
                         }
 
-                        val tls = SSLSocketFactory.getDefault()
-                            .createSocket(socket, host, 443, false) as SSLSocket
+                        val tlsFactory = SSLSocketFactory.getDefault() as SSLSocketFactory
+                        val tls = tlsFactory.createSocket(socket, host, 443, false) as SSLSocket
                         tls.use {
                             it.soTimeout = 3_500
                             it.startHandshake()
