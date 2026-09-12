@@ -99,7 +99,8 @@ class MainActivity : AppCompatActivity() {
             .appendLine("Config: $config")
             .appendLine(
                 "Telegram proxy: running=${TelegramWsProxyService.running.value}, " +
-                    "starting=${TelegramWsProxyService.starting.value}",
+                    "starting=${TelegramWsProxyService.starting.value}, " +
+                    "port=${TelegramWsProxyService.portForLink(this)}",
             )
             .appendLine("Last failure: ${ConnectionDiagnostics.lastFailure(this) ?: "none"}")
 
@@ -609,13 +610,13 @@ class MainActivity : AppCompatActivity() {
                 if (running) {
                     openTelegramProxyLink(link)
                 } else {
-                    startTelegramAndApply(link)
+                    startTelegramAndApply()
                 }
             }
             .show()
     }
 
-    private fun startTelegramAndApply(link: String) {
+    private fun startTelegramAndApply() {
         try {
             TelegramWsProxyService.start(this)
         } catch (error: RuntimeException) {
@@ -630,7 +631,7 @@ class MainActivity : AppCompatActivity() {
         telegramStartJob = lifecycleScope.launch {
             if (TelegramWsProxyService.awaitReady()) {
                 updateStatus()
-                openTelegramProxyLink(link)
+                openTelegramProxyLink(telegramProxyLink())
             } else {
                 updateStatus()
                 Toast.makeText(
@@ -649,7 +650,7 @@ class MainActivity : AppCompatActivity() {
             .authority("t.me")
             .appendPath("proxy")
             .appendQueryParameter("server", "127.0.0.1")
-            .appendQueryParameter("port", "1443")
+            .appendQueryParameter("port", TelegramWsProxyService.portForLink(this).toString())
             .appendQueryParameter("secret", secret)
             .build()
             .toString()
@@ -678,7 +679,11 @@ class MainActivity : AppCompatActivity() {
             .scheme("tg")
             .authority("proxy")
             .appendQueryParameter("server", httpsUri.getQueryParameter("server") ?: "127.0.0.1")
-            .appendQueryParameter("port", httpsUri.getQueryParameter("port") ?: "1443")
+            .appendQueryParameter(
+                "port",
+                httpsUri.getQueryParameter("port")
+                    ?: TelegramWsProxyService.portForLink(this).toString(),
+            )
             .appendQueryParameter("secret", httpsUri.getQueryParameter("secret") ?: "")
             .build()
         val packageCandidates = listOf(
@@ -726,7 +731,11 @@ class MainActivity : AppCompatActivity() {
         val proxyIp = preferences.getStringNotNull("byedpi_proxy_ip", "127.0.0.1")
         val proxyPort = preferences.getStringNotNull("byedpi_proxy_port", "1080")
         binding.proxyAddress.text = getString(R.string.proxy_address, proxyIp, proxyPort)
-        binding.telegramProxyAddress.text = getString(R.string.telegram_proxy_address, "127.0.0.1", "1443")
+        binding.telegramProxyAddress.text = getString(
+            R.string.telegram_proxy_address,
+            "127.0.0.1",
+            TelegramWsProxyService.portForLink(this).toString(),
+        )
         binding.telegramProxyStatus.setText(
             when {
                 TelegramWsProxyService.running.value -> R.string.telegram_proxy_ready

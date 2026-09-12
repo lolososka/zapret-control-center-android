@@ -28,9 +28,11 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.launch
-import java.security.SecureRandom
+import java.net.InetAddress
 import java.net.InetSocketAddress
+import java.net.ServerSocket
 import java.net.Socket
+import java.security.SecureRandom
 import kotlinx.coroutines.Job
 
 class TelegramWsProxyService : Service() {
@@ -44,10 +46,14 @@ class TelegramWsProxyService : Service() {
         private const val NOTIFICATION_ID = 205
         private const val PREFS = "telegram_ws_proxy"
         private const val SECRET = "secret"
+        private const val PORT = "port"
+        private const val DEFAULT_PORT = 1443
         private val _running = MutableStateFlow(false)
         val running: StateFlow<Boolean> = _running
         private val _starting = MutableStateFlow(false)
         val starting: StateFlow<Boolean> = _starting
+        private val _port = MutableStateFlow(DEFAULT_PORT)
+        val port: StateFlow<Int> = _port
 
         fun start(context: android.content.Context) {
             if (_running.value || _starting.value) return
@@ -87,6 +93,10 @@ class TelegramWsProxyService : Service() {
             }
             return "dd$secret"
         }
+
+        fun portForLink(context: Context): Int =
+            if (_running.value) _port.value
+            else context.getSharedPreferences(PREFS, MODE_PRIVATE).getInt(PORT, DEFAULT_PORT)
     }
 
     override fun onCreate() {
@@ -124,20 +134,35 @@ class TelegramWsProxyService : Service() {
                     cloudflare = true,
                     domain = "",
                 )
-                val result = TelegramWsProxy.start("127.0.0.1", 1443, "", secret)
-                if (result == 0 && waitForPort()) {
+                val preferredPort = prefs.getInt(PORT, DEFAULT_PORT)
+                val attemptedPorts = linkedSetOf(preferredPort)
+                attemptedPorts.addAll(findAvailablePorts(3))
+
+                var selectedPort: Int? = null
+                var lastResult = -3
+                for (candidatePort in attemptedPorts) {
+                    lastResult = TelegramWsProxy.start("127.0.0.1", candidatePort, "", secret)
+                    if (lastResult == 0 && waitForPort(candidatePort)) {
+                        selectedPort = candidatePort
+                        break
+                    }
+                    if (lastResult == 0) runCatching { TelegramWsProxy.stop() }
+                }
+
+                if (selectedPort != null) {
+                    prefs.edit().putInt(PORT, selectedPort).apply()
+                    _port.value = selectedPort
                     ConnectionDiagnostics.clear(this@TelegramWsProxyService)
                     _running.value = true
                     _starting.value = false
-                    updateNotification(getString(R.string.telegram_ws_running))
+                    updateNotification(getString(R.string.telegram_ws_running, selectedPort))
                 } else {
-                    Log.e("TelegramWsProxy", "StartProxy returned $result")
+                    Log.e("TelegramWsProxy", "StartProxy returned $lastResult for ports $attemptedPorts")
                     ConnectionDiagnostics.record(
                         this@TelegramWsProxyService,
                         "Telegram MTProto",
-                        "native start returned $result",
+                        "native start returned $lastResult; unable to bind a local port",
                     )
-                    if (result == 0) runCatching { TelegramWsProxy.stop() }
                     _running.value = false
                     _starting.value = false
                     updateNotification(getString(R.string.telegram_ws_failed))
@@ -154,11 +179,11 @@ class TelegramWsProxyService : Service() {
         }
     }
 
-    private suspend fun waitForPort(): Boolean {
+    private suspend fun waitForPort(port: Int): Boolean {
         repeat(20) {
             try {
                 Socket().use { socket ->
-                    socket.connect(InetSocketAddress("127.0.0.1", 1443), 250)
+                    socket.connect(InetSocketAddress("127.0.0.1", port), 250)
                 }
                 return true
             } catch (_: Exception) {
@@ -166,6 +191,20 @@ class TelegramWsProxyService : Service() {
             }
         }
         return false
+    }
+
+    private fun findAvailablePorts(count: Int): List<Int> {
+        val reservations = mutableListOf<ServerSocket>()
+        return try {
+            repeat(count) {
+                reservations += ServerSocket(0, 1, InetAddress.getByName("127.0.0.1"))
+            }
+            reservations.map { it.localPort }
+        } catch (_: Exception) {
+            reservations.map { it.localPort }
+        } finally {
+            reservations.forEach { runCatching { it.close() } }
+        }
     }
 
     private fun stopProxy() {
