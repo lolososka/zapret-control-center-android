@@ -24,7 +24,11 @@ target_link_libraries(byedpi PRIVATE android log)
 if(ANDROID_ABI STREQUAL "arm64-v8a" OR ANDROID_ABI STREQUAL "armeabi-v7a")
     add_library(tgwsproxy SHARED IMPORTED)
     set_target_properties(tgwsproxy PROPERTIES
-            IMPORTED_LOCATION "${CMAKE_CURRENT_SOURCE_DIR}/../tgwsLibs/${ANDROID_ABI}/libtgwsproxy.so")
+            IMPORTED_LOCATION "${CMAKE_CURRENT_SOURCE_DIR}/../tgwsLibs/${ANDROID_ABI}/libtgwsproxy.so"
+            # The Rust cdylib has no DT_SONAME. Without this property CMake
+            # records the CI runner's absolute IMPORTED_LOCATION in
+            # libtgwsbridge.so's DT_NEEDED entry, which Android cannot load.
+            IMPORTED_NO_SONAME TRUE)
 else()
     add_library(tgwsproxy SHARED telegram-ws-stub.c)
     target_link_options(tgwsproxy PRIVATE

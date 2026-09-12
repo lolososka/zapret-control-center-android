@@ -60,6 +60,24 @@ jobs:
         shell: bash
         run: bash ./gradlew --no-daemon --stacktrace lintDebug testDebugUnitTest assembleDebug assembleDebugAndroidTest
 
+      - name: Validate native runtime dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="$(find app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' -print -quit)"
+          readelf="$ANDROID_HOME/ndk/26.1.10909125/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
+          mapfile -t entries < <(unzip -Z1 "$apk" | grep -E '^lib/[^/]+/[^/]+\.so$')
+          for entry in "${entries[@]}"; do
+            elf="$RUNNER_TEMP/${entry//\//_}"
+            unzip -p "$apk" "$entry" > "$elf"
+            while IFS= read -r dependency; do
+              if [[ "$dependency" == */* ]]; then
+                echo "::error::$entry contains a non-portable DT_NEEDED dependency: $dependency"
+                exit 1
+              fi
+            done < <("$readelf" -d "$elf" | sed -n 's/.*Shared library: \[\([^]]*\)\].*/\1/p')
+          done
+
       - name: Upload debug APK
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

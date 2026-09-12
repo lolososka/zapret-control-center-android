@@ -18,7 +18,13 @@ object ConnectionDiagnostics {
     }
 
     fun record(context: Context, component: String, error: Throwable) {
-        val detail = error.message?.trim().orEmpty().ifBlank { error.javaClass.simpleName }
+        val detail = generateSequence(error) { current -> current.cause }
+            .take(4)
+            .joinToString(" <- ") { current ->
+                val message = current.message?.trim().orEmpty()
+                if (message.isBlank()) current.javaClass.simpleName
+                else "${current.javaClass.simpleName}: $message"
+            }
         record(context, component, detail)
     }
 

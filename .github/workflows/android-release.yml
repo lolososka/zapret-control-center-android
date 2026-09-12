@@ -189,6 +189,15 @@ jobs:
           for entry in "${native_entries[@]}"; do
             elf_file="$elf_dir/${entry//\//_}"
             unzip -p "${apks[0]}" "$entry" > "$elf_file"
+            while IFS= read -r dependency; do
+              if [[ "$dependency" == */* ]]; then
+                echo "::error::$entry contains a non-portable DT_NEEDED dependency: $dependency"
+                exit 1
+              fi
+            done < <(
+              "$ANDROID_HOME/ndk/26.1.10909125/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" -d "$elf_file" |
+                sed -n 's/.*Shared library: \[\([^]]*\)\].*/\1/p'
+            )
             mapfile -t load_alignments < <(
               "$objdump" -p "$elf_file" |
                 awk '$1 == "LOAD" { value=$NF; sub(/^2\*\*/, "", value); print value }'
