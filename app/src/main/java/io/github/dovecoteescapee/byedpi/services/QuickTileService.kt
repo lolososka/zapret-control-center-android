@@ -17,6 +17,7 @@ import androidx.core.service.quicksettings.PendingIntentActivityWrapper
 import androidx.core.service.quicksettings.TileServiceCompat
 import io.github.dovecoteescapee.byedpi.R
 import io.github.dovecoteescapee.byedpi.activities.MainActivity
+import io.github.dovecoteescapee.byedpi.core.StrategyProfiles
 import io.github.dovecoteescapee.byedpi.data.*
 import io.github.dovecoteescapee.byedpi.utility.getPreferences
 import io.github.dovecoteescapee.byedpi.utility.mode
@@ -74,10 +75,12 @@ class QuickTileService : TileService() {
         unregisterReceiver(receiver)
     }
 
-    private fun launchActivity() {
+    private fun launchActivity(autoStart: Boolean = false) {
+        val intent = Intent(this, MainActivity::class.java)
+            .putExtra(MainActivity.EXTRA_AUTO_START, autoStart)
         TileServiceCompat.startActivityAndCollapse(
             this, PendingIntentActivityWrapper(
-                this, 0, Intent(this, MainActivity::class.java),
+                this, if (autoStart) 1 else 0, intent,
                 PendingIntent.FLAG_UPDATE_CURRENT, false
             )
         )
@@ -111,10 +114,18 @@ class QuickTileService : TileService() {
         when (status) {
             AppStatus.Halted -> {
                 val mode = getPreferences().mode()
+                val autoSelected =
+                    StrategyProfiles.selected(getPreferences()) == StrategyProfiles.Profile.Auto
 
                 if (mode == Mode.VPN && VpnService.prepare(this) != null) {
                     updateStatus()
-                    launchActivity()
+                    launchActivity(autoStart = autoSelected)
+                    return
+                }
+
+                if (autoSelected) {
+                    updateStatus()
+                    launchActivity(autoStart = true)
                     return
                 }
 

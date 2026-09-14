@@ -8,6 +8,7 @@ import androidx.preference.*
 import io.github.dovecoteescapee.byedpi.BuildConfig
 import io.github.dovecoteescapee.byedpi.R
 import io.github.dovecoteescapee.byedpi.activities.StrategyPickerActivity
+import io.github.dovecoteescapee.byedpi.activities.UpdateActivity
 import io.github.dovecoteescapee.byedpi.core.StrategyProfiles
 import io.github.dovecoteescapee.byedpi.data.Mode
 import io.github.dovecoteescapee.byedpi.utility.*
@@ -56,9 +57,15 @@ class MainSettingsFragment : PreferenceFragmentCompat() {
         val uiSettings = findPreferenceNotNull<Preference>("byedpi_ui_settings")
         val cmdSettings = findPreferenceNotNull<Preference>("byedpi_cmd_settings")
         val strategyPicker = findPreferenceNotNull<Preference>("strategy_picker")
+        val appUpdate = findPreferenceNotNull<Preference>("app_update")
 
         strategyPicker.setOnPreferenceClickListener {
             startActivity(android.content.Intent(requireContext(), StrategyPickerActivity::class.java))
+            true
+        }
+        appUpdate.summary = getString(R.string.update_current_version, BuildConfig.VERSION_NAME)
+        appUpdate.setOnPreferenceClickListener {
+            startActivity(android.content.Intent(requireContext(), UpdateActivity::class.java))
             true
         }
 

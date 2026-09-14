@@ -10,6 +10,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import io.github.dovecoteescapee.byedpi.activities.MainActivity
 import io.github.dovecoteescapee.byedpi.activities.SettingsActivity
 import io.github.dovecoteescapee.byedpi.activities.StrategyPickerActivity
+import io.github.dovecoteescapee.byedpi.activities.UpdateActivity
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -49,6 +50,15 @@ class MainScreenSmokeTest {
                 assertTrue("Strategy picker action is disabled", apply.isEnabled)
             }
             screenshot("strategy.png")
+        }
+        ActivityScenario.launch<UpdateActivity>(Intent(context, UpdateActivity::class.java)).use { scenario ->
+            instrumentation.waitForIdleSync()
+            scenario.onActivity { activity ->
+                val action = activity.findViewById<TextView>(R.id.update_primary)
+                assertTrue("Update action has no label", action.text.isNotBlank())
+                assertTrue("Update action is clipped", action.isShown && action.width > 0)
+            }
+            screenshot("update.png")
         }
     }
 

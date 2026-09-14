@@ -3,6 +3,7 @@ package io.github.dovecoteescapee.byedpi.activities
 import android.os.Bundle
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
 import com.google.android.material.card.MaterialCardView
 import io.github.dovecoteescapee.byedpi.R
 import io.github.dovecoteescapee.byedpi.core.StrategyProfiles
@@ -27,6 +28,10 @@ class StrategyPickerActivity : AppCompatActivity() {
         messagingCard = findViewById(R.id.strategy_messaging_card)
         gamesCard = findViewById(R.id.strategy_games_card)
         strongCard = findViewById(R.id.strategy_strong_card)
+        listOf(autoCard, balancedCard, messagingCard, gamesCard, strongCard).forEach { card ->
+            card.isCheckable = true
+            card.isFocusable = true
+        }
         selected = StrategyProfiles.selected(getPreferences())
         select(selected)
 
@@ -57,6 +62,20 @@ class StrategyPickerActivity : AppCompatActivity() {
         messagingCard.strokeWidth = if (profile == StrategyProfiles.Profile.Messaging) 2 else 1
         gamesCard.strokeWidth = if (profile == StrategyProfiles.Profile.Games) 2 else 1
         strongCard.strokeWidth = if (profile == StrategyProfiles.Profile.Strong) 2 else 1
+        val states = mapOf(
+            autoCard to (profile == StrategyProfiles.Profile.Auto),
+            balancedCard to (profile == StrategyProfiles.Profile.Balanced),
+            messagingCard to (profile == StrategyProfiles.Profile.Messaging),
+            gamesCard to (profile == StrategyProfiles.Profile.Games),
+            strongCard to (profile == StrategyProfiles.Profile.Strong),
+        )
+        states.forEach { (card, checked) ->
+            card.isChecked = checked
+            ViewCompat.setStateDescription(
+                card,
+                getString(if (checked) R.string.strategy_selected else R.string.strategy_not_selected),
+            )
+        }
     }
 
     override fun onSupportNavigateUp(): Boolean {

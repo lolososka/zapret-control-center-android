@@ -78,6 +78,10 @@
         android:title="@string/about_category">
 
         <Preference
+            android:key="app_update"
+            android:title="@string/update_title" />
+
+        <Preference
             android:key="components_attribution"
             android:title="@string/components_attribution_title" />
 

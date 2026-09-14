@@ -118,19 +118,6 @@
                         android:textColor="@color/zapret_instrument_muted"
                         android:textSize="10sp" />
 
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:background="@drawable/bg_engine_chip"
-                        android:fontFamily="sans-serif-medium"
-                        android:includeFontPadding="false"
-                        android:paddingStart="11dp"
-                        android:paddingTop="7dp"
-                        android:paddingEnd="11dp"
-                        android:paddingBottom="7dp"
-                        android:text="@string/connection_badge"
-                        android:textColor="@color/zapret_instrument_text"
-                        android:textSize="11sp" />
                 </LinearLayout>
 
                 <io.github.dovecoteescapee.byedpi.activities.RouteDialView
@@ -155,19 +142,6 @@
                     android:textSize="30sp"
                     android:textStyle="bold"
                     tools:text="@string/vpn_disconnected" />
-
-                <TextView
-                    android:id="@+id/status_detail"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:gravity="center"
-                    android:fontFamily="sans-serif"
-                    android:includeFontPadding="false"
-                    android:lineSpacingExtra="2dp"
-                    android:textColor="@color/zapret_instrument_muted"
-                    android:textSize="14sp"
-                    tools:text="@string/status_ready" />
 
                 <TextView
                     android:id="@+id/strategy_badge"
@@ -291,34 +265,6 @@
                         tools:text="VPN" />
                 </LinearLayout>
 
-                <View
-                    android:layout_width="match_parent"
-                    android:layout_height="1dp"
-                    android:background="@color/zapret_line" />
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="56dp"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal">
-
-                    <TextView
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:fontFamily="sans-serif"
-                        android:text="@string/traffic_processing_label"
-                        android:textColor="@color/zapret_muted"
-                        android:textSize="14sp" />
-
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:fontFamily="sans-serif-medium"
-                        android:text="@string/traffic_processing_local"
-                        android:textColor="@color/zapret_ink"
-                        android:textSize="14sp" />
-                </LinearLayout>
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
@@ -371,15 +317,6 @@
                         android:textSize="10sp" />
                 </LinearLayout>
 
-                <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="5dp"
-                    android:fontFamily="sans-serif"
-                    android:text="@string/telegram_card_summary"
-                    android:textColor="@color/zapret_instrument_muted"
-                    android:textSize="12sp" />
-
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -425,13 +362,5 @@
             android:textSize="13sp"
             app:rippleColor="@color/zapret_line" />
 
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:gravity="center"
-            android:fontFamily="sans-serif"
-            android:text="@string/footer_local"
-            android:textColor="@color/zapret_muted"
-            android:textSize="11sp" />
     </LinearLayout>
 </androidx.core.widget.NestedScrollView>

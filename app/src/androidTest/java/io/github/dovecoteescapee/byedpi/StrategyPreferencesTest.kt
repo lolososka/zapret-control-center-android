@@ -40,4 +40,42 @@ class StrategyPreferencesTest {
         assertFalse(balanced.desyncUdp)
         assertEquals(0, balanced.udpFakeCount)
     }
+
+    @Test
+    fun autoSelectionSurvivesCandidateChanges() {
+        preferences.edit().clear().commit()
+
+        StrategyProfiles.apply(preferences, StrategyProfiles.Profile.Auto)
+        StrategyProfiles.applyAutoCandidate(preferences, StrategyProfiles.Profile.Strong)
+
+        assertEquals(StrategyProfiles.Profile.Auto, StrategyProfiles.selected(preferences))
+        assertEquals(StrategyProfiles.Profile.Strong, StrategyProfiles.active(preferences))
+        val active = ByeDpiProxyUIPreferences(preferences)
+        assertEquals("fake", active.desyncMethod.name.lowercase())
+        assertTrue(active.tlsRecordSplit)
+    }
+
+    @Test
+    fun invalidAutoCandidateFallsBackToBalanced() {
+        preferences.edit()
+            .clear()
+            .putString(StrategyProfiles.KEY, StrategyProfiles.Profile.Auto.id)
+            .putString(StrategyProfiles.ACTIVE_KEY, "missing")
+            .commit()
+
+        assertEquals(StrategyProfiles.Profile.Auto, StrategyProfiles.selected(preferences))
+        assertEquals(StrategyProfiles.Profile.Balanced, StrategyProfiles.active(preferences))
+    }
+
+    @Test
+    fun trialConfigurationDoesNotCommitUnverifiedCandidate() {
+        preferences.edit().clear().commit()
+        StrategyProfiles.apply(preferences, StrategyProfiles.Profile.Auto)
+
+        StrategyProfiles.stageAutoCandidate(preferences, StrategyProfiles.Profile.Strong)
+
+        assertEquals(StrategyProfiles.Profile.Auto, StrategyProfiles.selected(preferences))
+        assertEquals(StrategyProfiles.Profile.Balanced, StrategyProfiles.active(preferences))
+        assertEquals("fake", ByeDpiProxyUIPreferences(preferences).desyncMethod.name.lowercase())
+    }
 }

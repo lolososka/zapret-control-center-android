@@ -17,4 +17,10 @@
         android:title="@string/save_logs"
         app:showAsAction="never" />
 
+    <item
+        android:id="@+id/action_update"
+        android:orderInCategory="3"
+        android:title="@string/update_title"
+        app:showAsAction="never" />
+
 </menu>

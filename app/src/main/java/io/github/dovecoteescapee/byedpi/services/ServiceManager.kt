@@ -31,6 +31,10 @@ object ServiceManager {
 
     fun stop(context: Context) {
         val (_, mode) = appStatus
+        stop(context, mode)
+    }
+
+    fun stop(context: Context, mode: Mode) {
         when (mode) {
             Mode.VPN -> {
                 Log.i(TAG, "Stopping VPN")
