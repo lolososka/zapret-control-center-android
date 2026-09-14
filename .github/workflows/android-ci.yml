@@ -67,6 +67,7 @@ jobs:
           apk="$(find app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' -print -quit)"
           readelf="$ANDROID_HOME/ndk/26.1.10909125/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
           mapfile -t entries < <(unzip -Z1 "$apk" | grep -E '^lib/[^/]+/[^/]+\.so$')
+          compat_bridges=0
           for entry in "${entries[@]}"; do
             elf="$RUNNER_TEMP/${entry//\//_}"
             unzip -p "$apk" "$entry" > "$elf"
@@ -76,7 +77,18 @@ jobs:
                 exit 1
               fi
             done < <("$readelf" -d "$elf" | sed -n 's/.*Shared library: \[\([^]]*\)\].*/\1/p')
+            if [[ "$entry" == */libtgwsbridge_compat.so ]]; then
+              compat_bridges=$((compat_bridges + 1))
+              if "$readelf" -lW "$elf" | grep -q 'GNU_RELRO'; then
+                echo "::error::$entry must remain the RELRO-failure compatibility fallback."
+                exit 1
+              fi
+            fi
           done
+          if [[ "$compat_bridges" -ne 4 ]]; then
+            echo "::error::Expected one Telegram compatibility bridge for every ABI; found $compat_bridges."
+            exit 1
+          fi
 
       - name: Upload debug APK
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

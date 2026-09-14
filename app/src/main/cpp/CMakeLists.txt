@@ -41,3 +41,14 @@ target_link_options(tgwsbridge PRIVATE
         "-Wl,-z,max-page-size=16384"
         "-Wl,-z,common-page-size=16384")
 target_link_libraries(tgwsbridge PRIVATE tgwsproxy log)
+
+# A few Android 13 vendor linkers return ENOMEM while applying GNU_RELRO to a
+# valid 16 KiB-aligned bridge. Keep a narrowly scoped fallback: the Rust core
+# and all other native libraries retain RELRO, while this tiny JNI-only bridge
+# can still load on affected realme/HONOR firmware.
+add_library(tgwsbridge_compat SHARED telegram-ws-jni.c)
+target_link_options(tgwsbridge_compat PRIVATE
+        "-Wl,-z,max-page-size=16384"
+        "-Wl,-z,common-page-size=16384"
+        "-Wl,-z,norelro")
+target_link_libraries(tgwsbridge_compat PRIVATE tgwsproxy log)

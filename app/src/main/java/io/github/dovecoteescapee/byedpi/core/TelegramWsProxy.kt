@@ -4,7 +4,16 @@ package io.github.dovecoteescapee.byedpi.core
 object TelegramWsProxy {
     init {
         System.loadLibrary("tgwsproxy")
-        System.loadLibrary("tgwsbridge")
+        try {
+            System.loadLibrary("tgwsbridge")
+        } catch (primary: UnsatisfiedLinkError) {
+            try {
+                System.loadLibrary("tgwsbridge_compat")
+            } catch (fallback: UnsatisfiedLinkError) {
+                fallback.addSuppressed(primary)
+                throw fallback
+            }
+        }
     }
 
     fun configure(poolSize: Int, cacheDir: String, cloudflare: Boolean, domain: String) {

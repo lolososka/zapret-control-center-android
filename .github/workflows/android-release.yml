@@ -186,6 +186,8 @@ jobs:
           fi
           elf_dir="$RUNNER_TEMP/elf-alignment"
           mkdir -p "$elf_dir"
+          readelf="$ANDROID_HOME/ndk/26.1.10909125/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
+          compat_bridges=0
           for entry in "${native_entries[@]}"; do
             elf_file="$elf_dir/${entry//\//_}"
             unzip -p "${apks[0]}" "$entry" > "$elf_file"
@@ -194,10 +196,14 @@ jobs:
                 echo "::error::$entry contains a non-portable DT_NEEDED dependency: $dependency"
                 exit 1
               fi
-            done < <(
-              "$ANDROID_HOME/ndk/26.1.10909125/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" -d "$elf_file" |
-                sed -n 's/.*Shared library: \[\([^]]*\)\].*/\1/p'
-            )
+            done < <("$readelf" -d "$elf_file" | sed -n 's/.*Shared library: \[\([^]]*\)\].*/\1/p')
+            if [[ "$entry" == */libtgwsbridge_compat.so ]]; then
+              compat_bridges=$((compat_bridges + 1))
+              if "$readelf" -lW "$elf_file" | grep -q 'GNU_RELRO'; then
+                echo "::error::$entry must remain the RELRO-failure compatibility fallback."
+                exit 1
+              fi
+            fi
             mapfile -t load_alignments < <(
               "$objdump" -p "$elf_file" |
                 awk '$1 == "LOAD" { value=$NF; sub(/^2\*\*/, "", value); print value }'
@@ -213,6 +219,10 @@ jobs:
               fi
             done
           done
+          if [[ "$compat_bridges" -ne 4 ]]; then
+            echo "::error::Expected one Telegram compatibility bridge for every ABI; found $compat_bridges."
+            exit 1
+          fi
 
           install -m 0644 "${apks[0]}" "$candidate_dir/$unsigned_name"
           if [[ "$SOURCE_ARCHIVE" != "$candidate_dir/$source_name" || ! -s "$SOURCE_ARCHIVE" ]]; then

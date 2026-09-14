@@ -6,6 +6,15 @@ extern void SetCfProxyConfig(int enabled, int priority, const char *user_domain)
 extern int StartProxy(const char *host, int port, const char *dc_ips, const char *secret, int verbose);
 extern int StopProxy(void);
 
+/*
+ * Some Android 13 vendor linkers fail to protect a tiny 16 KiB-aligned
+ * library when its GNU_RELRO range extends past the final writable mapping.
+ * Keep one writable page after RELRO so those linkers have a fully mapped
+ * range to protect. The fallback bridge remains available for broken vendor
+ * linkers that still reject RELRO.
+ */
+__attribute__((used)) static volatile unsigned char android_relro_tail[16384] = { 1 };
+
 static const char *utf(JNIEnv *env, jstring value) {
     return value == NULL ? "" : (*env)->GetStringUTFChars(env, value, NULL);
 }
@@ -19,6 +28,7 @@ Java_io_github_dovecoteescapee_byedpi_core_TelegramWsProxy_nativeConfigure(
         JNIEnv *env, jobject self, jint pool_size, jstring cache_dir,
         jboolean cloudflare, jstring domain) {
     (void) self;
+    (void) android_relro_tail[0];
     const char *cache = utf(env, cache_dir);
     const char *user_domain = utf(env, domain);
     SetPoolSize((int) pool_size);
