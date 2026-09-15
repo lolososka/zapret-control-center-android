@@ -1,15 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
-<data-extraction-rules>
+<data-extraction-rules xmlns:tools="http://schemas.android.com/tools">
+    <!-- Keep device-protected exclusions supported by Android. AGP 8.3 lint
+         has an outdated domain list: developer.android.com/identity/data/autobackup. -->
     <cloud-backup>
         <exclude domain="root" path="." />
         <exclude domain="file" path="." />
         <exclude domain="database" path="." />
         <exclude domain="sharedpref" path="." />
         <exclude domain="external" path="." />
-        <exclude domain="device_root" path="." />
-        <exclude domain="device_file" path="." />
-        <exclude domain="device_database" path="." />
-        <exclude domain="device_sharedpref" path="." />
+        <exclude domain="device_root" path="." tools:ignore="FullBackupContent" />
+        <exclude domain="device_file" path="." tools:ignore="FullBackupContent" />
+        <exclude domain="device_database" path="." tools:ignore="FullBackupContent" />
+        <exclude domain="device_sharedpref" path="." tools:ignore="FullBackupContent" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="root" path="." />
@@ -17,9 +19,9 @@
         <exclude domain="database" path="." />
         <exclude domain="sharedpref" path="." />
         <exclude domain="external" path="." />
-        <exclude domain="device_root" path="." />
-        <exclude domain="device_file" path="." />
-        <exclude domain="device_database" path="." />
-        <exclude domain="device_sharedpref" path="." />
+        <exclude domain="device_root" path="." tools:ignore="FullBackupContent" />
+        <exclude domain="device_file" path="." tools:ignore="FullBackupContent" />
+        <exclude domain="device_database" path="." tools:ignore="FullBackupContent" />
+        <exclude domain="device_sharedpref" path="." tools:ignore="FullBackupContent" />
     </device-transfer>
 </data-extraction-rules>
