@@ -2,6 +2,7 @@
 // Neither secrets nor Telegram request URLs are printed or passed on the command line.
 const endpoint = process.argv[2];
 const checkOnly = process.argv[3] === "--check-only";
+const diagnoseOnly = process.argv[3] === "--diagnose";
 let config;
 try {
   const chunks = [];
@@ -59,6 +60,22 @@ async function telegram(method, body) {
   }
 }
 
+function classifyWebhookError(message) {
+  if (typeof message !== "string" || message.length === 0) return "none";
+  const status = /\b([45]\d\d)\b/.exec(message)?.[1];
+  if (status) return `http_${status}`;
+  if (/ssl|tls|certificate/i.test(message)) return "tls";
+  if (/timed?\s*out|timeout/i.test(message)) return "timeout";
+  if (/host|dns|resolve/i.test(message)) return "dns";
+  if (/connect|network/i.test(message)) return "connection";
+  return "other";
+}
+
+function hasExpectedUpdates(updates) {
+  return Array.isArray(updates) && updates.length === 2 &&
+    ["message", "callback_query"].every((kind) => updates.includes(kind));
+}
+
 try {
   const me = await telegram("getMe", {});
   if (me?.is_bot !== true || !Number.isSafeInteger(me.id) || me.id <= 0 ||
@@ -70,6 +87,21 @@ try {
     if (member?.user?.id !== me.id || !["administrator", "creator"].includes(member.status)) {
       console.error("Добавьте этого бота администратором канала @Slag0dworld и повторите настройку.");
       process.exitCode = 1;
+    } else if (diagnoseOnly) {
+      const expectedUrl = new URL("/telegram/webhook", base).href;
+      const webhook = await telegram("getWebhookInfo", {});
+      const pending = Number.isSafeInteger(webhook?.pending_update_count)
+        ? Math.min(Math.max(webhook.pending_update_count, 0), 1_000_000) : 0;
+      const currentTime = Math.floor(Date.now() / 1000);
+      const errorDate = webhook?.last_error_date;
+      console.log(JSON.stringify({
+        urlMatches: webhook?.url === expectedUrl,
+        allowedUpdatesMatch: hasExpectedUpdates(webhook?.allowed_updates),
+        pendingUpdates: pending,
+        lastErrorKind: classifyWebhookError(webhook?.last_error_message),
+        hasRecentError: Number.isSafeInteger(errorDate) && errorDate > 0 &&
+          errorDate <= currentTime && errorDate >= currentTime - 600,
+      }));
     } else if (checkOnly) {
       console.log("Имя бота и административный статус подтверждены.");
     } else {
@@ -79,8 +111,7 @@ try {
       if (installed !== true) throw new Error();
       const webhook = await telegram("getWebhookInfo", {});
       if (webhook?.url !== webhookUrl || webhook.has_custom_certificate === true ||
-          !Array.isArray(webhook.allowed_updates) ||
-          !["message", "callback_query"].every((kind) => webhook.allowed_updates.includes(kind))) {
+          !hasExpectedUpdates(webhook.allowed_updates)) {
         throw new Error();
       }
       console.log("Webhook подключён. Теперь проверьте подписку через приложение.");

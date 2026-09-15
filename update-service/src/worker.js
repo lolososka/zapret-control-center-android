@@ -1,6 +1,9 @@
 const CHANNEL_ID = "@Slag0dworld";
 const SESSION_TTL = 600;
 const MAX_ACTIVE_SESSIONS = 5000;
+const TELEGRAM_ATTEMPTS = 2;
+const TELEGRAM_ATTEMPT_TIMEOUT_MS = 3500;
+const TELEGRAM_RETRY_DELAY_MS = 100;
 const OPAQUE_VALUE = /^[A-Za-z0-9_-]{43}$/;
 const STABLE_VERSION = /^(0|[1-9]\d{0,4})\.(0|[1-9]\d{0,4})\.(0|[1-9]\d{0,4})$/;
 const encoder = new TextEncoder();
@@ -24,6 +27,17 @@ function json(value, status = 200, extra = {}) {
       ...extra,
     },
   });
+}
+
+function telegramWebhookReply(method, body) {
+  // Telegram supports invoking one Bot API method directly from a successful
+  // webhook response. Unlike retrying sendMessage, this cannot create duplicates.
+  return json({ ...body, method });
+}
+
+function telegramRetryAfter(headerValue, bodyValue) {
+  const value = /^\d+$/.test(headerValue ?? "") ? Number(headerValue) : bodyValue;
+  return Number.isInteger(value) && value > 0 ? Math.min(value, 60) : 3;
 }
 
 function opaqueValue() {
@@ -178,23 +192,61 @@ function realPrivateUser(message) {
 
 export function createWorker({ fetchImpl = (...args) => fetch(...args), now = () => Math.floor(Date.now() / 1000) } = {}) {
   async function telegram(env, method, body) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 8000);
-    try {
-      const response = await fetchImpl(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`, {
-        method: "POST", redirect: "error", signal: controller.signal,
-        headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-      });
-      if (!response.ok) throw new Error();
-      const data = await readBoundedJson(response, 16384);
-      if (data.ok !== true) throw new Error();
-      return data.result;
-    } catch {
-      // Never propagate Telegram's request URL (which includes the bot token).
-      throw new HttpError(503, "telegram_unavailable");
-    } finally {
-      clearTimeout(timer);
+    // Retrying is safe only because this helper is restricted to the read-only
+    // membership lookup. Message and callback replies use the webhook response.
+    if (method !== "getChatMember") throw new HttpError(503, "telegram_unsafe_method");
+    const endpoint = `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`;
+    const requestBody = JSON.stringify(body);
+    let lastError = new HttpError(503, "telegram_unavailable");
+    for (let attempt = 0; attempt < TELEGRAM_ATTEMPTS; attempt++) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), TELEGRAM_ATTEMPT_TIMEOUT_MS);
+      let retryable = true;
+      try {
+        const response = await fetchImpl(endpoint, {
+          // workerd supports manual/follow only. Manual exposes redirects so
+          // non-2xx handling rejects them without forwarding the bot token.
+          method: "POST", redirect: "manual", signal: controller.signal,
+          headers: { "Accept": "application/json", "Content-Type": "application/json" }, body: requestBody,
+        });
+        if (!response.ok) {
+          if (response.status === 429) {
+            let data;
+            try { data = await readBoundedJson(response, 16384); } catch { data = null; }
+            retryable = false;
+            throw new HttpError(429, "rate_limited",
+              telegramRetryAfter(response.headers.get("Retry-After"), data?.parameters?.retry_after));
+          }
+          if (response.body) await response.body.cancel().catch(() => {});
+          const safeStatus = response.status >= 400 && response.status <= 599 ? response.status : 0;
+          retryable = safeStatus >= 500;
+          throw new HttpError(503, `telegram_http_${safeStatus}`);
+        }
+        let data;
+        try { data = await readBoundedJson(response, 16384); }
+        catch { throw new HttpError(503, "telegram_invalid_response"); }
+        if (data.ok !== true) {
+          const apiStatus = Number.isInteger(data.error_code) && data.error_code >= 400 && data.error_code <= 599 ?
+            data.error_code : 0;
+          if (apiStatus === 429) {
+            retryable = false;
+            throw new HttpError(429, "rate_limited", telegramRetryAfter(null, data.parameters?.retry_after));
+          }
+          retryable = apiStatus >= 500;
+          throw new HttpError(503, `telegram_api_${apiStatus}`);
+        }
+        return data.result;
+      } catch (error) {
+        // Never propagate Telegram's request URL (which includes the bot token).
+        lastError = error instanceof HttpError && (error.code.startsWith("telegram_") || error.status === 429) ?
+          error : new HttpError(503, "telegram_network_error");
+        if (!retryable || attempt + 1 === TELEGRAM_ATTEMPTS) throw lastError;
+      } finally {
+        clearTimeout(timer);
+      }
+      await new Promise((resolve) => setTimeout(resolve, TELEGRAM_RETRY_DELAY_MS));
     }
+    throw lastError;
   }
 
   async function checkMembership(env, session, userId) {
@@ -219,19 +271,20 @@ export function createWorker({ fetchImpl = (...args) => fetch(...args), now = ()
       await env.DB.prepare(`UPDATE sessions SET status = 'pending', verified_until = NULL, checking_until = 0
         WHERE id = ?1 AND telegram_user_id = ?2 AND checking_until = ?3`)
         .bind(claimed.id, userId, checkedAt + 10).run();
-      throw error instanceof HttpError ? error : new HttpError(503, "telegram_unavailable");
+      // Keep Telegram transport/API details out of the public client protocol.
+      throw error instanceof HttpError && error.status === 429 ?
+        error : new HttpError(503, "telegram_unavailable");
     }
   }
 
-  async function sendResult(env, userId, id, status) {
+  function sendResult(userId, status) {
     const text = status === "verified" ? "Подписка подтверждена. Вернитесь в Zapret." :
       status === "not_member" ? "Подпишитесь на @Slag0dworld и нажмите «Проверить»." :
-      "Telegram не ответил. Попробуйте проверить ещё раз.";
-    await telegram(env, "sendMessage", {
+      "Готово. Вернитесь в Zapret и нажмите «Проверить».";
+    return telegramWebhookReply("sendMessage", {
       chat_id: Number(userId), text,
       reply_markup: { inline_keyboard: [
         [{ text: "Открыть канал", url: "https://t.me/Slag0dworld" }],
-        [{ text: "Проверить", callback_data: `check:${id}` }],
       ] },
     });
   }
@@ -255,16 +308,16 @@ export function createWorker({ fetchImpl = (...args) => fetch(...args), now = ()
           .bind(userId, start[2], now()).first();
         const session = bound ?? await env.DB.prepare("SELECT * FROM sessions WHERE id = ?1").bind(start[2]).first();
         if (!session || session.expires_at <= now() || session.telegram_user_id !== userId) {
-          await telegram(env, "sendMessage", { chat_id: message.from.id, text: "Ссылка устарела. Откройте обновление в Zapret заново." });
-          return json({ ok: true });
+          return telegramWebhookReply("sendMessage", {
+            chat_id: message.from.id, text: "Ссылка устарела. Откройте обновление в Zapret заново.",
+          });
         }
-        let status = "pending";
-        try { status = payload(await checkMembership(env, session, userId), now()).status; }
-        catch (error) { if (error.status === 429) return json({ ok: true }); }
-        await sendResult(env, userId, session.id, status);
+        // The webhook only binds Telegram identity. Membership is checked by the
+        // authenticated POST /authorize request when the user returns to Zapret.
+        return sendResult(userId, "pending");
       } else if (message.text === "/start" || message.text === "/privacy") {
         if (!await allowTelegramUser(env, now(), message.from.id)) return json({ ok: true });
-        await telegram(env, "sendMessage", {
+        return telegramWebhookReply("sendMessage", {
           chat_id: message.from.id,
           text: message.text === "/privacy" ?
             "Для обновления проверяем только подписку на @Slag0dworld. Telegram ID и сессия хранятся до 10 минут плюс время очистки. Переписку и трафик Zapret бот не получает." :
@@ -279,21 +332,9 @@ export function createWorker({ fetchImpl = (...args) => fetch(...args), now = ()
       // Acknowledge throttled updates with 200 to prevent Telegram redelivery.
       // Do not answerCallbackQuery: that would itself consume the abused quota.
       if (!await allowTelegramUser(env, now(), callback.from.id)) return json({ ok: true });
-      const match = /^check:([A-Za-z0-9_-]{43})$/.exec(callback.data ?? "");
-      let answer = "Ссылка устарела. Откройте Zapret.";
-      if (match && isOpaque(match[1]) && realPrivateUser({ from: callback.from, chat: callback.message?.chat })) {
-        const session = await env.DB.prepare("SELECT * FROM sessions WHERE id = ?1").bind(match[1]).first();
-        const userId = String(callback.from.id);
-        if (session?.expires_at > now() && session.telegram_user_id === userId) {
-          try {
-            const status = payload(await checkMembership(env, session, userId), now()).status;
-            answer = status === "verified" ? "Подписка подтверждена. Вернитесь в Zapret." : "Подписка пока не найдена.";
-          } catch (error) {
-            answer = error.status === 429 ? "Проверка уже идёт." : "Telegram не ответил. Повторите проверку.";
-          }
-        }
-      }
-      await telegram(env, "answerCallbackQuery", { callback_query_id: callback.id, text: answer });
+      return telegramWebhookReply("answerCallbackQuery", {
+        callback_query_id: callback.id, text: "Вернитесь в Zapret и нажмите «Проверить».",
+      });
     }
     return json({ ok: true });
   }

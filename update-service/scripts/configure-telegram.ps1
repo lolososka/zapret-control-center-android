@@ -2,7 +2,8 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$WorkerUrl,
     [string]$NodePath = '',
-    [switch]$TokenFromClipboard
+    [switch]$TokenFromClipboard,
+    [switch]$DiagnoseOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -66,6 +67,11 @@ try {
     $stdinConfiguration = @{ token = $tokenText; secret = $secretText; botUsername = $botUsername } | ConvertTo-Json -Compress
 
     # Secrets travel only through redirected stdin; not argv, environment, files or history.
+    if ($DiagnoseOnly) {
+        $stdinConfiguration | & $nodeCommand 'scripts/register-webhook.mjs' $WorkerUrl '--diagnose'
+        if ($LASTEXITCODE -ne 0) { throw 'Telegram не вернул безопасную диагностику webhook.' }
+        return
+    }
     $stdinConfiguration | & $nodeCommand 'scripts/register-webhook.mjs' $WorkerUrl '--check-only'
     if ($LASTEXITCODE -ne 0) { throw 'Проверка бота не пройдена. Секреты в Cloudflare не изменены.' }
 

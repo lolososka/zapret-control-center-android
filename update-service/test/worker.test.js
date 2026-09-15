@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { createWorker } from "../src/worker.js";
 
 const NONCE = Buffer.alloc(32, 7).toString("base64url");
@@ -25,6 +27,7 @@ function fixture() {
   let time = 1000;
   let memberStatus = "member";
   let telegramError = false;
+  const telegramFailures = [];
   let restrictedMember = false;
   let memberGate;
   const calls = [];
@@ -33,9 +36,19 @@ function fixture() {
   const worker = createWorker({ now: () => time, fetchImpl: async (url, options) => {
     const method = url.split("/").at(-1);
     const body = JSON.parse(options.body);
-    calls.push({ method, body });
+    calls.push({ method, body, redirect: options.redirect });
+    // Node accepts redirect:error; workerd does not. Keep the mock faithful to
+    // this edge-runtime restriction so a Node-only test cannot hide it again.
+    assert.equal(options.redirect, "manual");
     if (method === "getChatMember") {
       if (memberGate) await memberGate;
+      const failure = telegramFailures.shift();
+      if (failure === "network") throw new TypeError("connection lost");
+      if (failure === "invalid-json") return new Response("not json", { status: 200, headers: { "Content-Type": "application/json" } });
+      if (Number.isInteger(failure)) return Response.json({ ok: false, error_code: failure }, {
+        status: failure, headers: failure === 429 ? { "Retry-After": "2" } :
+          failure >= 300 && failure < 400 ? { Location: "https://redirect.invalid/never-follow" } : {},
+      });
       if (telegramError) return Response.json({ ok: false }, { status: 500 });
       return Response.json({ ok: true, result: { status: memberStatus, user: { id: body.user_id }, is_member: restrictedMember } });
     }
@@ -68,7 +81,8 @@ function fixture() {
   });
   return { sqlite, env, worker, request, create, start, callback, calls,
     advance(seconds) { time += seconds; }, setStatus(value, isMember = false) { memberStatus = value; restrictedMember = isMember; },
-    failTelegram() { telegramError = true; }, blockMembership(promise) { memberGate = promise; } };
+    failTelegram() { telegramError = true; }, failTelegramOnce(value) { telegramFailures.push(value); },
+    blockMembership(promise) { memberGate = promise; } };
 }
 
 test("new sessions contain random secrets, fixed bot URL, no raw bearer in D1, no cache/CORS", async () => {
@@ -122,18 +136,20 @@ test("forged webhook cannot bind, and bots/groups/mismatched sender IDs are igno
   f.sqlite.close();
 });
 
-test("member proof binds first account only and authorization freshly rechecks bound ID", async () => {
+test("payload start only binds first account and authorization checks the bound ID", async () => {
   const f = fixture();
   const s = await f.create();
-  assert.equal((await f.start(s.id)).status, 200);
+  const startResponse = await f.start(s.id);
+  assert.equal(startResponse.status, 200);
+  assert.equal((await startResponse.json()).method, "sendMessage");
   await f.start(s.id, USER + 1);
-  const checkCalls = f.calls.filter((call) => call.method === "getChatMember");
-  assert.equal(checkCalls.length, 1);
-  assert.deepEqual(checkCalls[0].body, { chat_id: "@Slag0dworld", user_id: USER });
+  assert.equal(f.calls.filter((call) => call.method === "getChatMember").length, 0);
   assert.equal(f.sqlite.prepare("SELECT telegram_user_id FROM sessions").get().telegram_user_id, String(USER));
   const response = await f.request(`/v1/sessions/${s.id}/authorize`, { method: "POST", token: s.token });
   assert.deepEqual(await response.json(), { status: "verified", version: "0.3.0", nonce: NONCE, expiresAt: 1600 });
-  assert.equal(f.calls.filter((call) => call.method === "getChatMember").length, 2);
+  const checkCalls = f.calls.filter((call) => call.method === "getChatMember");
+  assert.equal(checkCalls.length, 1);
+  assert.deepEqual(checkCalls[0].body, { chat_id: "@Slag0dworld", user_id: USER });
   f.sqlite.close();
 });
 
@@ -151,7 +167,7 @@ test("missing token, wrong token, and another session's token cannot poll/author
   f.sqlite.close();
 });
 
-test("unsubscribed/restricted-not-member deny; callback can confirm new subscription", async () => {
+test("unsubscribed/restricted-not-member deny; only authorize can confirm a new subscription", async () => {
   const f = fixture();
   const s = await f.create();
   f.setStatus("left");
@@ -159,7 +175,9 @@ test("unsubscribed/restricted-not-member deny; callback can confirm new subscrip
   let response = await f.request(`/v1/sessions/${s.id}/authorize`, { method: "POST", token: s.token });
   assert.equal((await response.json()).status, "not_member");
   f.setStatus("restricted", false);
-  await f.callback(s.id);
+  await f.callback(s.id); // legacy buttons are acknowledged without an outbound check
+  response = await f.request(`/v1/sessions/${s.id}/authorize`, { method: "POST", token: s.token });
+  assert.equal((await response.json()).status, "not_member");
   response = await f.request(`/v1/sessions/${s.id}`, { token: s.token });
   assert.equal((await response.json()).status, "not_member");
   f.setStatus("restricted", true);
@@ -190,11 +208,17 @@ test("fresh recheck failure invalidates previously verified entitlement; leaving
   const f = fixture();
   const s = await f.create();
   await f.start(s.id);
-  f.setStatus("left");
   let response = await f.request(`/v1/sessions/${s.id}/authorize`, { method: "POST", token: s.token });
+  assert.equal((await response.json()).status, "verified");
+  assert.equal(f.sqlite.prepare("SELECT verified_until FROM sessions").get().verified_until, 1600);
+  f.setStatus("left");
+  response = await f.request(`/v1/sessions/${s.id}/authorize`, { method: "POST", token: s.token });
   assert.equal((await response.json()).status, "not_member");
+  assert.equal(f.sqlite.prepare("SELECT verified_until FROM sessions").get().verified_until, null);
   f.setStatus("member");
-  await f.callback(s.id);
+  response = await f.request(`/v1/sessions/${s.id}/authorize`, { method: "POST", token: s.token });
+  assert.equal((await response.json()).status, "verified");
+  assert.equal(f.sqlite.prepare("SELECT verified_until FROM sessions").get().verified_until, 1600);
   f.failTelegram();
   response = await f.request(`/v1/sessions/${s.id}/authorize`, { method: "POST", token: s.token });
   assert.equal(response.status, 503);
@@ -205,28 +229,86 @@ test("fresh recheck failure invalidates previously verified entitlement; leaving
   f.sqlite.close();
 });
 
-test("callback ownership and replay cannot retain a grant after account leaves", async () => {
+test("authorize retries one network, malformed JSON, or 5xx failure but never retries Telegram 4xx", async () => {
+  for (const failure of ["network", "invalid-json", 500, 503]) {
+    const transient = fixture();
+    const session = await transient.create();
+    await transient.start(session.id);
+    transient.failTelegramOnce(failure);
+    const response = await transient.request(`/v1/sessions/${session.id}/authorize`, { method: "POST", token: session.token });
+    assert.equal(response.status, 200, String(failure));
+    assert.equal((await response.json()).status, "verified");
+    assert.equal(transient.calls.filter((call) => call.method === "getChatMember").length, 2);
+    transient.sqlite.close();
+  }
+
+  const rejected = fixture();
+  const rejectedSession = await rejected.create();
+  await rejected.start(rejectedSession.id);
+  rejected.failTelegramOnce(401);
+  let response = await rejected.request(`/v1/sessions/${rejectedSession.id}/authorize`, {
+    method: "POST", token: rejectedSession.token,
+  });
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), { error: "telegram_unavailable" });
+  assert.equal(rejected.calls.filter((call) => call.method === "getChatMember").length, 1);
+  rejected.sqlite.close();
+
+  const limited = fixture();
+  const limitedSession = await limited.create();
+  await limited.start(limitedSession.id);
+  limited.failTelegramOnce(429);
+  response = await limited.request(`/v1/sessions/${limitedSession.id}/authorize`, {
+    method: "POST", token: limitedSession.token,
+  });
+  assert.equal(response.status, 429);
+  assert.equal(response.headers.get("Retry-After"), "2");
+  assert.deepEqual(await response.json(), { error: "rate_limited" });
+  assert.equal(limited.calls.filter((call) => call.method === "getChatMember").length, 1);
+  limited.sqlite.close();
+});
+
+test("Telegram redirects are rejected without following or retrying and invalidate a previous grant", async () => {
   const f = fixture();
   const s = await f.create();
   await f.start(s.id);
-  const before = f.calls.filter((call) => call.method === "getChatMember").length;
-  await f.callback(s.id, USER + 1);
-  assert.equal(f.calls.filter((call) => call.method === "getChatMember").length, before);
-  f.setStatus("left");
-  await f.callback(s.id);
-  await f.callback(s.id); // repeat update_id/callback; always a fresh check, never cached success
-  const response = await f.request(`/v1/sessions/${s.id}`, { token: s.token });
-  assert.equal((await response.json()).status, "not_member");
-  assert.equal(f.calls.at(-1).method, "answerCallbackQuery");
+  let response = await f.request(`/v1/sessions/${s.id}/authorize`, { method: "POST", token: s.token });
+  assert.equal((await response.json()).status, "verified");
+  const callsBefore = f.calls.length;
+  f.failTelegramOnce(302);
+  response = await f.request(`/v1/sessions/${s.id}/authorize`, { method: "POST", token: s.token });
+  assert.equal(response.status, 503);
+  assert.deepEqual(await response.json(), { error: "telegram_unavailable" });
+  assert.equal(f.calls.length, callsBefore + 1);
+  assert.equal(f.calls.at(-1).redirect, "manual");
+  assert.equal(f.calls.at(-1).method, "getChatMember");
+  response = await f.request(`/v1/sessions/${s.id}`, { token: s.token });
+  assert.equal((await response.json()).status, "pending");
+  assert.equal(f.sqlite.prepare("SELECT verified_until FROM sessions").get().verified_until, null);
   f.sqlite.close();
 });
 
-test("concurrent /start messages cannot rebind and membership call lease prevents duplicate checks", async () => {
+test("legacy callback replay is acknowledged without membership checks or grants", async () => {
   const f = fixture();
   const s = await f.create();
+  await f.start(s.id);
+  const foreign = await f.callback(s.id, USER + 1);
+  assert.equal((await foreign.json()).method, "answerCallbackQuery");
+  const own = await f.callback(s.id);
+  assert.equal((await own.json()).method, "answerCallbackQuery");
+  assert.equal(f.calls.filter((call) => call.method === "getChatMember").length, 0);
+  const response = await f.request(`/v1/sessions/${s.id}`, { token: s.token });
+  assert.equal((await response.json()).status, "pending");
+  f.sqlite.close();
+});
+
+test("concurrent authorization uses a lease and payload starts cannot rebind", async () => {
+  const f = fixture();
+  const s = await f.create();
+  await f.start(s.id);
   let release;
   f.blockMembership(new Promise((resolve) => { release = resolve; }));
-  const pending = f.start(s.id);
+  const pending = f.request(`/v1/sessions/${s.id}/authorize`, { method: "POST", token: s.token });
   while (!f.calls.some((call) => call.method === "getChatMember")) await new Promise((resolve) => setImmediate(resolve));
   await f.start(s.id, USER + 1);
   const response = await f.request(`/v1/sessions/${s.id}/authorize`, { method: "POST", token: s.token });
@@ -234,7 +316,7 @@ test("concurrent /start messages cannot rebind and membership call lease prevent
   assert.equal(response.headers.get("retry-after"), "2");
   assert.equal(f.calls.filter((call) => call.method === "getChatMember").length, 1);
   release();
-  await pending;
+  assert.equal((await pending).status, 200);
   assert.equal(f.sqlite.prepare("SELECT telegram_user_id FROM sessions").get().telegram_user_id, String(USER));
   f.sqlite.close();
 });
@@ -285,15 +367,16 @@ test("webhook /start and callbacks share per-user quota, acknowledge spam and re
   for (let i = 0; i < 9; i++) assert.equal((await f.callback(s.id)).status, 200);
   const callsAtLimit = f.calls.length;
   const checksAtLimit = f.calls.filter((call) => call.method === "getChatMember").length;
-  assert.equal(checksAtLimit, 10);
+  assert.equal(checksAtLimit, 0);
   for (let i = 0; i < 20; i++) {
     assert.equal((await f.start(s.id)).status, 200);
     assert.equal((await f.callback(s.id)).status, 200);
   }
-  assert.equal(f.calls.length, callsAtLimit); // not even answerCallbackQuery/sendMessage
+  assert.equal(f.calls.length, callsAtLimit); // webhook replies need no outbound Bot API request
   f.advance(60);
-  await f.callback(s.id);
-  assert.equal(f.calls.filter((call) => call.method === "getChatMember").length, checksAtLimit + 1);
+  const resumed = await f.callback(s.id);
+  assert.equal((await resumed.json()).method, "answerCallbackQuery");
+  assert.equal(f.calls.filter((call) => call.method === "getChatMember").length, checksAtLimit);
   for (const row of f.sqlite.prepare("SELECT * FROM rate_limits").all()) {
     assert.match(row.bucket_key, /^[a-f0-9]{64}$/);
     assert.equal(JSON.stringify(row).includes(String(USER)), false);
@@ -305,12 +388,17 @@ test("/start without argument and /privacy are throttled by the same account bud
   const f = fixture();
   const send = (text) => f.request("/telegram/webhook", { method: "POST", secret: WEBHOOK_SECRET,
     body: { update_id: 3, message: { text, from: { id: USER, is_bot: false }, chat: { id: USER, type: "private" } } } });
-  for (let i = 0; i < 15; i++) assert.equal((await send(i % 2 ? "/start" : "/privacy")).status, 200);
-  assert.equal(f.calls.filter((call) => call.method === "sendMessage").length, 10);
+  let directReplies = 0;
+  for (let i = 0; i < 15; i++) {
+    const response = await send(i % 2 ? "/start" : "/privacy");
+    assert.equal(response.status, 200);
+    if ((await response.json()).method === "sendMessage") directReplies++;
+  }
+  assert.equal(directReplies, 10);
   assert.equal(f.calls.filter((call) => call.method === "getChatMember").length, 0);
   f.advance(60);
-  await send("/privacy");
-  assert.equal(f.calls.length, 11);
+  assert.equal((await (await send("/privacy")).json()).method, "sendMessage");
+  assert.equal(f.calls.length, 0);
   f.sqlite.close();
 });
 
@@ -318,6 +406,9 @@ test("webhook throttling cannot grant after fresh authorization fails or steal c
   const f = fixture();
   const s = await f.create();
   await f.start(s.id);
+  const verified = await f.request(`/v1/sessions/${s.id}/authorize`, { method: "POST", token: s.token });
+  assert.equal((await verified.json()).status, "verified");
+  assert.equal(f.sqlite.prepare("SELECT verified_until FROM sessions").get().verified_until, 1600);
   for (let i = 0; i < 9; i++) await f.callback(s.id);
   const checks = f.calls.filter((call) => call.method === "getChatMember").length;
   await f.callback(s.id, USER + 1); // distinct authenticated account, no ownership
@@ -362,4 +453,43 @@ test("nonempty authorize body still requires JSON Content-Type, even when body i
   }
   assert.equal(f.calls.length, 0);
   f.sqlite.close();
+});
+
+test("setup diagnostics require exact update types and report only errors from the last ten minutes", () => {
+  const timestamp = 1_700_000_000;
+  const endpoint = "https://membership.example/";
+  const run = (allowedUpdates, errorDate) => {
+    // A preload replaces all fetches with fixed Telegram responses. No live bot,
+    // credentials, webhook, or network connection is used by this CLI test.
+    const webhook = { url: `${endpoint}telegram/webhook`, allowed_updates: allowedUpdates,
+      pending_update_count: 7, last_error_message: "Wrong response: 503", last_error_date: errorDate };
+    const preload = `Date.now = () => ${timestamp * 1000};
+      globalThis.fetch = async (url) => {
+        const method = url.split('/').at(-1);
+        const result = method === 'getMe' ? { is_bot: true, id: ${USER}, username: 'ZapretExampleBot' } :
+          method === 'getChatMember' ? { user: { id: ${USER} }, status: 'administrator' } :
+          method === 'getWebhookInfo' ? ${JSON.stringify(webhook)} : null;
+        if (result === null) throw new Error('Unexpected API request');
+        return Response.json({ ok: true, result });
+      };`;
+    const output = execFileSync(process.execPath, ["--import",
+      `data:text/javascript,${encodeURIComponent(preload)}`,
+      fileURLToPath(new URL("../scripts/register-webhook.mjs", import.meta.url)), endpoint, "--diagnose"], {
+      encoding: "utf8", input: JSON.stringify({ token: "123456789:" + "x".repeat(35),
+        secret: WEBHOOK_SECRET, botUsername: "ZapretExampleBot" }), timeout: 5000,
+    });
+    return JSON.parse(output);
+  };
+  assert.deepEqual(run(["callback_query", "message"], timestamp - 60), {
+    urlMatches: true, allowedUpdatesMatch: true, pendingUpdates: 7,
+    lastErrorKind: "http_503", hasRecentError: true,
+  });
+  for (const updates of [["message"], ["message", "callback_query", "channel_post"],
+    ["message", "message"], undefined]) {
+    assert.equal(run(updates, timestamp - 60).allowedUpdatesMatch, false);
+  }
+  for (const errorDate of [undefined, 0, timestamp - 601, timestamp + 1, "1700000000"]) {
+    assert.equal(run(["message", "callback_query"], errorDate).hasRecentError, false);
+  }
+  assert.equal(run(["message", "callback_query"], timestamp - 600).hasRecentError, true);
 });
