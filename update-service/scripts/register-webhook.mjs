@@ -73,8 +73,16 @@ try {
     } else if (checkOnly) {
       console.log("Имя бота и административный статус подтверждены.");
     } else {
-      await telegram("setWebhook", { url: new URL("/telegram/webhook", base).href,
+      const webhookUrl = new URL("/telegram/webhook", base).href;
+      const installed = await telegram("setWebhook", { url: webhookUrl,
         secret_token: secret, allowed_updates: ["message", "callback_query"], max_connections: 5 });
+      if (installed !== true) throw new Error();
+      const webhook = await telegram("getWebhookInfo", {});
+      if (webhook?.url !== webhookUrl || webhook.has_custom_certificate === true ||
+          !Array.isArray(webhook.allowed_updates) ||
+          !["message", "callback_query"].every((kind) => webhook.allowed_updates.includes(kind))) {
+        throw new Error();
+      }
       console.log("Webhook подключён. Теперь проверьте подписку через приложение.");
     }
   }
