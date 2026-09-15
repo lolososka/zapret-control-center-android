@@ -2,7 +2,7 @@
 
 Небольшой Cloudflare Worker проверяет подписку на **@Slag0dworld** через Telegram-бота. Это не VPN и не прокси: трафик Zapret и переписка через него не проходят. Продакшен-зависимостей нет; Wrangler нужен только для разработки и развёртывания.
 
-Сервис не развёрнут из этого репозитория автоматически. В конфигурации указан созданный владельцем бот **@ZapretLoLBot**. Она намеренно неполная: без базы и секретов проверка закрыта. Не включайте платный тариф ради установки.
+Инфраструктура проекта развёрнута в личном аккаунте владельца: D1 и Worker `https://zapret-update-membership.zapret-update-membership.workers.dev`. Деплой не запускается из этого репозитория автоматически. Бот — **@ZapretLoLBot**; подключение webhook требует локальной настройки секретов. До этого проверка закрыта. Не включайте платный тариф ради установки.
 
 ## 1. Создать бота
 
@@ -20,11 +20,11 @@
 ```powershell
 pnpm install --frozen-lockfile
 node --test
-node node_modules/wrangler/bin/wrangler.js login --scopes account:read user:read workers:write workers_scripts:write d1:write
+node node_modules/wrangler/bin/wrangler.js login --device --browser=false --scopes account:read user:read workers:write workers_scripts:write d1:write
 node node_modules/wrangler/bin/wrangler.js d1 create zapret-update-membership
 ```
 
-В `wrangler.toml` `BOT_USERNAME` уже установлен в `ZapretLoLBot` **без @**. Для своего развёртывания с другим ботом замените его на собственное имя. Раскомментируйте блок `[[d1_databases]]` и вставьте `database_id`, полученный при создании базы. ID базы не секрет; токен бота — секрет. `CHANNEL_ID` оставьте `@Slag0dworld`.
+Эти команды нужны для собственного развёртывания форка, а не для повторного создания уже работающей базы проекта. В `wrangler.toml` замените `account_id` на свой, `database_id` — на ID новой базы, `BOT_USERNAME` — на имя своего бота **без @**. Указанные в репозитории ID не дают доступа к аккаунту владельца и не являются секретами. Для другого канала потребуется изменить закреплённый `CHANNEL_ID` также в исходниках и клиенте.
 
 ```powershell
 node node_modules/wrangler/bin/wrangler.js d1 migrations apply zapret-update-membership --remote
@@ -49,6 +49,8 @@ Wrangler выдаст HTTPS-адрес вида `https://zapret-update-membershi
 ```
 
 Мастер попросит токен BotFather через `Read-Host -AsSecureString` и создаст webhook-секрет автоматически. Он сверит `getMe.username` с конфигурацией и административный статус бота в канале, затем передаст значения локально установленному Wrangler через stdin и подключит webhook. На время настройки принудительно включается `WRANGLER_LOG_SANITIZE=true`, даже если в окружении отладочное логирование тел запросов было разрешено. Секреты не сохраняются в файлы, переменные окружения, историю команд или аргументы процессов. Не передавайте токен в `-WorkerUrl` и не отправляйте его в чат.
+
+Если `node` не находится в PATH вашего терминала, добавьте `-NodePath 'C:/путь/к/node.exe'`. Это путь к исполняемому файлу, не секрет.
 
 Webhook принимает только `message` и `callback_query`. Скрипты не выводят секреты или Telegram URL с токеном и **не запускаются** при деплое, тестах или открытии приложения. Первичный деплой без секретов намеренно отвечает `service_not_configured`; мастер загружает их в уже опубликованный Worker. Другую программу с `getUpdates` для этого же бота одновременно использовать нельзя.
 

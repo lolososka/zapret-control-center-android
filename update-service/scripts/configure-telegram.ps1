@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory = $true)]
-    [string]$WorkerUrl
+    [string]$WorkerUrl,
+    [string]$NodePath = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -16,7 +17,12 @@ if ($workerAddress.Scheme -ne 'https' -or $workerAddress.UserInfo -or $workerAdd
     $workerAddress.Fragment -or $workerAddress.AbsolutePath -ne '/' -or -not $workerAddress.IsDefaultPort) {
     throw 'Нужен корневой HTTPS-адрес опубликованного Worker.'
 }
-$nodeCommand = (Get-Command node -ErrorAction Stop).Source
+if ($NodePath) {
+    $nodeCommand = (Resolve-Path -LiteralPath $NodePath -ErrorAction Stop).Path
+    if (-not (Test-Path -LiteralPath $nodeCommand -PathType Leaf)) { throw 'Не найден Node.js.' }
+} else {
+    $nodeCommand = (Get-Command node -ErrorAction Stop).Source
+}
 $wranglerScript = Join-Path $serviceRoot 'node_modules/wrangler/bin/wrangler.js'
 if (-not (Test-Path -LiteralPath $wranglerScript -PathType Leaf)) {
     throw 'Сначала установите зависимости сервиса (pnpm install или npm install).'

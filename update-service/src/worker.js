@@ -58,7 +58,8 @@ async function readBoundedJson(request, maxBytes, allowEmpty = false) {
     if (allowEmpty) return {};
     throw new HttpError(400, "invalid_body");
   }
-  if (request.headers.get("Content-Type")?.split(";")[0].trim().toLowerCase() !== "application/json") {
+  const hasJsonType = request.headers.get("Content-Type")?.split(";")[0].trim().toLowerCase() === "application/json";
+  if (!allowEmpty && !hasJsonType) {
     throw new HttpError(415, "json_required");
   }
   const reader = request.body.getReader();
@@ -86,6 +87,9 @@ async function readBoundedJson(request, maxBytes, allowEmpty = false) {
     reader.releaseLock();
   }
   if (length === 0 && allowEmpty) return {};
+  // workerd exposes a readable body even for an empty HTTP POST. Validate
+  // content type only after determining whether its optional body is empty.
+  if (!hasJsonType) throw new HttpError(415, "json_required");
   const bytes = new Uint8Array(length);
   let offset = 0;
   for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }

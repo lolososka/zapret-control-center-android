@@ -332,3 +332,34 @@ test("webhook throttling cannot grant after fresh authorization fails or steal c
   assert.equal(f.sqlite.prepare("SELECT verified_until FROM sessions").get().verified_until, null);
   f.sqlite.close();
 });
+
+test("authorize accepts an empty ReadableStream without Content-Type as supplied by workerd", async () => {
+  const f = fixture();
+  const s = await f.create();
+  const response = await f.worker.fetch(new Request(`https://membership.example/v1/sessions/${s.id}/authorize`, {
+    method: "POST", headers: { Authorization: `Bearer ${s.token}`, "CF-Connecting-IP": "192.0.2.10" },
+    body: new ReadableStream({ start(controller) { controller.close(); } }), duplex: "half",
+  }), f.env);
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { status: "pending", version: "0.3.0", nonce: NONCE, expiresAt: 1600 });
+  assert.equal(f.calls.length, 0);
+  f.sqlite.close();
+});
+
+test("nonempty authorize body still requires JSON Content-Type, even when body is a stream", async () => {
+  const f = fixture();
+  const s = await f.create();
+  for (const contentType of [undefined, "text/plain"]) {
+    const headers = { Authorization: `Bearer ${s.token}`, "CF-Connecting-IP": "192.0.2.10" };
+    if (contentType) headers["Content-Type"] = contentType;
+    const response = await f.worker.fetch(new Request(`https://membership.example/v1/sessions/${s.id}/authorize`, {
+      method: "POST", headers,
+      body: new ReadableStream({ start(controller) { controller.enqueue(new TextEncoder().encode("{}")); controller.close(); } }),
+      duplex: "half",
+    }), f.env);
+    assert.equal(response.status, 415);
+    assert.deepEqual(await response.json(), { error: "json_required" });
+  }
+  assert.equal(f.calls.length, 0);
+  f.sqlite.close();
+});
