@@ -52,6 +52,12 @@ Wrangler выдаст HTTPS-адрес вида `https://zapret-update-membershi
 
 Если `node` не находится в PATH вашего терминала, добавьте `-NodePath 'C:/путь/к/node.exe'`. Это путь к исполняемому файлу, не секрет.
 
+Если терминал не разрешает вставку в скрытое поле, скопируйте только токен из BotFather и запустите мастер с `-TokenFromClipboard`. Он проверит формат, немедленно очистит буфер и не выведет токен:
+
+```powershell
+./scripts/configure-telegram.ps1 -WorkerUrl https://zapret-update-membership.zapret-update-membership.workers.dev/ -TokenFromClipboard
+```
+
 Webhook принимает только `message` и `callback_query`. Скрипты не выводят секреты или Telegram URL с токеном и **не запускаются** при деплое, тестах или открытии приложения. Первичный деплой без секретов намеренно отвечает `service_not_configured`; мастер загружает их в уже опубликованный Worker. Другую программу с `getUpdates` для этого же бота одновременно использовать нельзя.
 
 ## 4. Проверить перед выпуском

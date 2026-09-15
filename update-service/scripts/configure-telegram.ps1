@@ -1,7 +1,8 @@
 param(
     [Parameter(Mandatory = $true)]
     [string]$WorkerUrl,
-    [string]$NodePath = ''
+    [string]$NodePath = '',
+    [switch]$TokenFromClipboard
 )
 
 $ErrorActionPreference = 'Stop'
@@ -27,7 +28,26 @@ $wranglerScript = Join-Path $serviceRoot 'node_modules/wrangler/bin/wrangler.js'
 if (-not (Test-Path -LiteralPath $wranglerScript -PathType Leaf)) {
     throw 'Сначала установите зависимости сервиса (pnpm install или npm install).'
 }
-$tokenSecure = Read-Host 'Вставьте токен BotFather (ввод скрыт, не отправляйте его в чат)' -AsSecureString
+$clipboardToken = $null
+if ($TokenFromClipboard) {
+    try {
+        $clipboardToken = [string](Get-Clipboard -Raw -ErrorAction Stop)
+        Set-Clipboard -Value '' -ErrorAction Stop
+    } catch {
+        $clipboardToken = $null
+        throw 'Не удалось безопасно прочитать и очистить буфер обмена.'
+    }
+    $clipboardToken = $clipboardToken.Trim()
+    if ($clipboardToken -notmatch '^\d{5,16}:[A-Za-z0-9_-]{20,}$') {
+        $clipboardToken = $null
+        throw 'В буфере нет корректного токена BotFather. Скопируйте только токен и повторите.'
+    }
+    $tokenSecure = ConvertTo-SecureString -String $clipboardToken -AsPlainText -Force
+    $clipboardToken = $null
+    Write-Host 'Токен прочитан, буфер обмена очищен.'
+} else {
+    $tokenSecure = Read-Host 'Вставьте токен BotFather (ввод скрыт, не отправляйте его в чат)' -AsSecureString
+}
 $webhookBytes = New-Object byte[] 32
 $webhookRandom = [Security.Cryptography.RandomNumberGenerator]::Create()
 try { $webhookRandom.GetBytes($webhookBytes) } finally { $webhookRandom.Dispose() }
@@ -61,6 +81,7 @@ finally {
     [Environment]::SetEnvironmentVariable('WRANGLER_LOG_SANITIZE', $previousLogSanitize, 'Process')
     if ($tokenPointer -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($tokenPointer) }
     $tokenText = $null
+    $clipboardToken = $null
     $secretText = $null
     $stdinConfiguration = $null
     $tokenSecure.Dispose()
