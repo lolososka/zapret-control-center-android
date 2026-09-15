@@ -1,0 +1,22 @@
+name = "zapret-update-membership"
+main = "src/worker.js"
+compatibility_date = "2026-09-15"
+workers_dev = true
+
+[vars]
+BOT_USERNAME = "ZapretLoLBot"
+CHANNEL_ID = "@Slag0dworld"
+
+# Create a D1 database first, then uncomment this binding and insert its real ID.
+# Configure this binding before the initial deploy; upload secrets afterwards.
+# [[d1_databases]]
+# binding = "DB"
+# database_name = "zapret-update-membership"
+# database_id = "REPLACE_WITH_D1_DATABASE_ID"
+# migrations_dir = "migrations"
+
+[observability]
+enabled = false
+
+[triggers]
+crons = ["*/10 * * * *"]

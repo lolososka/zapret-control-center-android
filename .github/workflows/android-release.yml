@@ -28,6 +28,7 @@ jobs:
 
     env:
       CI: "true"
+      UPDATE_MEMBERSHIP_URL: ${{ vars.UPDATE_MEMBERSHIP_URL }}
 
     steps:
       - name: Checkout source and submodules
@@ -44,6 +45,10 @@ jobs:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
+          if [[ ! "${UPDATE_MEMBERSHIP_URL:-}" =~ ^https://[a-z0-9][a-z0-9.-]+(:443)?$ ]]; then
+            echo "::error::Configure the verified public UPDATE_MEMBERSHIP_URL before releasing."
+            exit 1
+          fi
           if [[ ! "$GITHUB_REF_NAME" =~ ^android-v([0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?)$ ]]; then
             echo "::error::Tag must match android-vX.Y.Z (optionally with a prerelease suffix)."
             exit 1
@@ -107,6 +112,9 @@ jobs:
 
           rsync -a --exclude='.git' ./ "$source_root/"
           git submodule status --recursive > "$source_root/SUBMODULE_REVISIONS.txt"
+          # This public compile-time setting is part of the corresponding source;
+          # rebuilding the archive must not silently produce an unconfigured APK.
+          printf '\nupdateMembershipUrl=%s\n' "$UPDATE_MEMBERSHIP_URL" >> "$source_root/gradle.properties"
 
           source_date_epoch="$(git show -s --format=%ct "${GITHUB_SHA}^{commit}")"
           tar \

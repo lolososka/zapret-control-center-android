@@ -15,10 +15,13 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.FileProvider
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.ViewModelProvider
 import com.google.android.material.button.MaterialButton
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import io.github.dovecoteescapee.byedpi.BuildConfig
 import io.github.dovecoteescapee.byedpi.R
 import io.github.dovecoteescapee.byedpi.core.AppUpdateRepository
+import io.github.dovecoteescapee.byedpi.core.UpdateMembershipRepository
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -33,10 +36,10 @@ class UpdateActivity : AppCompatActivity() {
     private var release: AppUpdateRepository.Release? = null
     private var pendingInstall: File? = null
     private var work: Job? = null
+    private lateinit var access: UpdateAccessViewModel
 
-    // No membership service is configured yet. Never infer access from a channel visit,
-    // saved activity state, or a local preference. A verified server proof must replace this.
-    private val hasVerifiedSubscription: Boolean get() = false
+    private val hasVerifiedSubscription: Boolean
+        get() = release?.let { access.grant?.isValid(it.version) } == true
 
     private val installPermission =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
@@ -52,6 +55,7 @@ class UpdateActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        access = ViewModelProvider(this)[UpdateAccessViewModel::class.java]
         setContentView(R.layout.activity_update)
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
         supportActionBar?.title = getString(R.string.update_title)
@@ -64,12 +68,21 @@ class UpdateActivity : AppCompatActivity() {
 
         versionText.text = getString(R.string.update_current_version, BuildConfig.VERSION_NAME)
         primaryButton.setOnClickListener { handlePrimaryAction() }
-        channelButton.setOnClickListener { openChannel() }
+        channelButton.setOnClickListener {
+            val session = access.session
+            if (session != null && release?.let { session.isValid(it.version) } == true) {
+                openBot(session)
+            } else openChannel()
+        }
         release = restoreRelease(savedInstanceState)
         val restoredApk = savedInstanceState
             ?.getString(STATE_APK_PATH)
             ?.let(::File)
-            ?.takeIf(File::isFile)
+            ?.takeIf { apk ->
+                runCatching {
+                    apk.isFile && apk.canonicalFile.parentFile == File(cacheDir, "updates").canonicalFile
+                }.getOrDefault(false)
+            }
         val restoredRelease = release
         if (restoredRelease == null) {
             renderIdle()
@@ -77,17 +90,22 @@ class UpdateActivity : AppCompatActivity() {
             renderAvailable(restoredRelease)
             if (restoredApk != null) {
                 pendingInstall = restoredApk
-                statusText.setText(R.string.update_ready_install)
-                primaryButton.setText(R.string.update_install)
+                renderAvailable(restoredRelease)
             }
         }
     }
 
     override fun onResume() {
         super.onResume()
-        if (pendingInstall != null && work?.isActive != true) {
+        if (access.awaitingBotReturn && work?.isActive != true && release != null) {
+            access.awaitingBotReturn = false
+            verifyMembership()
+        } else if (pendingInstall != null && work?.isActive != true) {
             primaryButton.isEnabled = true
-            primaryButton.setText(R.string.update_install)
+            primaryButton.setText(
+                if (hasVerifiedSubscription) R.string.update_install
+                else R.string.update_membership_confirm,
+            )
         }
     }
 
@@ -118,10 +136,14 @@ class UpdateActivity : AppCompatActivity() {
     private fun handlePrimaryAction() {
         val current = release
         when {
-            pendingInstall != null -> requestInstall(requireNotNull(pendingInstall))
             current == null -> checkForUpdate()
-            // Fail closed until a server can verify membership. Opening Telegram is not proof.
-            else -> openChannel()
+            !hasVerifiedSubscription -> {
+                if (access.session?.isValid(current.version) == true) verifyMembership()
+                else if (UpdateMembershipRepository.isConfigured()) confirmMembership()
+                else openChannel()
+            }
+            pendingInstall != null -> requestInstall(requireNotNull(pendingInstall))
+            else -> downloadAndInstall(current)
         }
     }
 
@@ -131,6 +153,10 @@ class UpdateActivity : AppCompatActivity() {
         work = lifecycleScope.launch {
             try {
                 val latest = AppUpdateRepository.latest()
+                if (latest?.version != release?.version) {
+                    access.clear()
+                    pendingInstall = null
+                }
                 release = latest
                 if (latest == null) renderCurrent() else renderAvailable(latest)
             } catch (error: CancellationException) {
@@ -151,6 +177,86 @@ class UpdateActivity : AppCompatActivity() {
         channelButton.visibility = View.GONE
     }
 
+    private fun confirmMembership() {
+        MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.update_membership_title)
+            .setMessage(R.string.update_membership_privacy)
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton(R.string.update_membership_continue) { _, _ -> beginMembership() }
+            .show()
+    }
+
+    private fun beginMembership() {
+        val current = release ?: return
+        if (work?.isActive == true) return
+        access.clear()
+        setBusy(R.string.update_membership_connecting, indeterminate = true)
+        work = lifecycleScope.launch {
+            try {
+                val session = UpdateMembershipRepository.create(current.version)
+                access.session = session
+                renderAvailable(current)
+                openBot(session)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: UpdateMembershipRepository.RateLimited) {
+                showMembershipCooldown(error.retryAfterSeconds)
+            } catch (_: Exception) {
+                // Authentication bodies, URLs and tokens must never enter exported diagnostics.
+                showError(R.string.update_membership_failed)
+            }
+        }
+    }
+
+    private fun verifyMembership() {
+        val current = release ?: return
+        val session = access.session ?: run {
+            renderAvailable(current)
+            return
+        }
+        if (work?.isActive == true) return
+        access.awaitingBotReturn = false
+        access.grant = null
+        setBusy(R.string.update_membership_checking, indeterminate = true)
+        work = lifecycleScope.launch {
+            try {
+                val check = UpdateMembershipRepository.authorize(session)
+                access.grant = check.grant
+                renderAvailable(current)
+                when (check.status) {
+                    UpdateMembershipRepository.Status.Pending ->
+                        statusText.setText(R.string.update_membership_waiting)
+                    UpdateMembershipRepository.Status.NotMember ->
+                        statusText.setText(R.string.update_membership_not_member)
+                    UpdateMembershipRepository.Status.Verified -> Unit
+                }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: UpdateMembershipRepository.SessionExpired) {
+                access.clear()
+                showError(R.string.update_membership_expired)
+            } catch (error: UpdateMembershipRepository.RateLimited) {
+                showMembershipCooldown(error.retryAfterSeconds)
+            } catch (_: Exception) {
+                access.grant = null
+                showError(R.string.update_membership_failed)
+            }
+        }
+    }
+
+    private fun openBot(session: UpdateMembershipRepository.Session) {
+        access.awaitingBotReturn = true
+        if (!openTelegramLink(session.botUrl)) {
+            access.awaitingBotReturn = false
+            Toast.makeText(this, R.string.update_channel_failed, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun showMembershipCooldown(seconds: Long) {
+        showError(R.string.update_membership_failed)
+        statusText.text = getString(R.string.update_membership_cooldown, seconds)
+    }
+
     private fun downloadAndInstall(current: AppUpdateRepository.Release) {
         if (!hasVerifiedSubscription) {
             showError(R.string.update_subscription_unavailable)
@@ -161,6 +267,11 @@ class UpdateActivity : AppCompatActivity() {
             return
         }
         if (work?.isActive == true) return
+        val session = access.session ?: run {
+            showError(R.string.update_membership_expired)
+            return
+        }
+        access.grant = null
         progress.isIndeterminate = false
         progress.progress = 0
         progress.visibility = View.VISIBLE
@@ -170,6 +281,16 @@ class UpdateActivity : AppCompatActivity() {
         statusText.visibility = View.VISIBLE
         work = lifecycleScope.launch {
             try {
+                val check = UpdateMembershipRepository.authorize(session)
+                access.grant = check.grant
+                if (check.status != UpdateMembershipRepository.Status.Verified) {
+                    renderAvailable(current)
+                    statusText.setText(
+                        if (check.status == UpdateMembershipRepository.Status.NotMember)
+                            R.string.update_membership_not_member else R.string.update_membership_waiting,
+                    )
+                    return@launch
+                }
                 val apk = AppUpdateRepository.download(this@UpdateActivity, current) { percent ->
                     runOnUiThread {
                         if (!isFinishing && !isDestroyed) {
@@ -184,8 +305,15 @@ class UpdateActivity : AppCompatActivity() {
                 requestInstall(apk)
             } catch (error: CancellationException) {
                 throw error
+            } catch (_: UpdateMembershipRepository.SessionExpired) {
+                access.clear()
+                showError(R.string.update_membership_expired)
+            } catch (error: UpdateMembershipRepository.RateLimited) {
+                access.grant = null
+                showMembershipCooldown(error.retryAfterSeconds)
             } catch (error: Exception) {
-                Log.e(TAG, "Update download failed", error)
+                // This path can include authentication; don't export URL/header exceptions.
+                access.grant = null
                 showError(R.string.update_download_failed)
             }
         }
@@ -267,18 +395,32 @@ class UpdateActivity : AppCompatActivity() {
     }
 
     private fun renderAvailable(current: AppUpdateRepository.Release) {
-        pendingInstall = null
         progress.visibility = View.GONE
         statusText.visibility = View.VISIBLE
-        statusText.setText(R.string.update_subscription_unavailable)
+        val hasSession = access.session?.isValid(current.version) == true
+        val configured = UpdateMembershipRepository.isConfigured()
+        statusText.setText(when {
+            hasVerifiedSubscription && pendingInstall != null -> R.string.update_ready_install
+            hasVerifiedSubscription -> R.string.update_membership_verified
+            hasSession -> R.string.update_membership_waiting
+            configured -> R.string.update_membership_required
+            else -> R.string.update_subscription_unavailable
+        })
         versionText.text = getString(
             R.string.update_version_change,
             BuildConfig.VERSION_NAME,
             current.version,
         )
         primaryButton.isEnabled = true
-        primaryButton.setText(R.string.update_open_channel)
-        channelButton.visibility = View.GONE
+        primaryButton.setText(when {
+            hasVerifiedSubscription && pendingInstall != null -> R.string.update_install
+            hasVerifiedSubscription -> R.string.update_download_install
+            hasSession -> R.string.update_membership_check
+            configured -> R.string.update_membership_confirm
+            else -> R.string.update_open_channel
+        })
+        channelButton.setText(if (hasSession) R.string.update_open_bot else R.string.update_channel)
+        channelButton.visibility = if (configured) View.VISIBLE else View.GONE
         channelButton.isEnabled = true
     }
 
@@ -299,21 +441,28 @@ class UpdateActivity : AppCompatActivity() {
         primaryButton.setText(R.string.update_retry)
         channelButton.visibility = View.VISIBLE
         channelButton.isEnabled = true
+        channelButton.setText(
+            if (access.session?.let { session -> release?.let { session.isValid(it.version) } } == true)
+                R.string.update_open_bot else R.string.update_channel,
+        )
     }
 
     private fun openChannel() {
-        val uri = Uri.parse(CHANNEL_URL)
+        if (!openTelegramLink(CHANNEL_URL)) {
+            Toast.makeText(this, R.string.update_channel_failed, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun openTelegramLink(url: String): Boolean {
+        val uri = Uri.parse(url)
         val telegram = Intent(Intent.ACTION_VIEW, uri).setPackage("org.telegram.messenger")
-        val opened = runCatching {
+        return runCatching {
             if (packageManager.resolveActivity(telegram, PackageManager.MATCH_DEFAULT_ONLY) != null) {
                 startActivity(telegram)
             } else {
                 startActivity(Intent(Intent.ACTION_VIEW, uri))
             }
         }.isSuccess
-        if (!opened) {
-            Toast.makeText(this, R.string.update_channel_failed, Toast.LENGTH_SHORT).show()
-        }
     }
 
     private fun restoreRelease(state: Bundle?): AppUpdateRepository.Release? {

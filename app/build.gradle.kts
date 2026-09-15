@@ -9,6 +9,13 @@ android {
     ndkVersion = "26.1.10909125"
 
     defaultConfig {
+        val membershipUrl = providers.gradleProperty("updateMembershipUrl")
+            .orElse(providers.environmentVariable("UPDATE_MEMBERSHIP_URL"))
+            .getOrElse("").trim().trimEnd('/')
+        require(membershipUrl.isEmpty() ||
+            Regex("^https://[a-z0-9][a-z0-9.-]+(?::443)?$").matches(membershipUrl)
+        ) { "UPDATE_MEMBERSHIP_URL must be a public HTTPS origin, without credentials or a path" }
+        buildConfigField("String", "UPDATE_MEMBERSHIP_URL", "\"$membershipUrl\"")
         // Keep the source namespace for the native JNI bridge, but publish the
         // fork as an independent app that can coexist with ByeDPIAndroid.
         applicationId = "io.github.lolososka.zapretmobile"

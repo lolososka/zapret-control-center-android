@@ -19,6 +19,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  membership:
+    name: Membership service tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Set up Node 24
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "24"
+      - name: Test membership service and SQLite transitions
+        working-directory: update-service
+        run: node --test
+
   verify:
     name: Lint, tests and debug APK
     runs-on: ubuntu-latest
@@ -26,6 +43,7 @@ jobs:
 
     env:
       CI: "true"
+      UPDATE_MEMBERSHIP_URL: ${{ vars.UPDATE_MEMBERSHIP_URL }}
 
     steps:
       - name: Checkout source and submodules
