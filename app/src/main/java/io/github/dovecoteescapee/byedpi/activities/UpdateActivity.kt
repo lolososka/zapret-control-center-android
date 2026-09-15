@@ -32,8 +32,11 @@ class UpdateActivity : AppCompatActivity() {
     private lateinit var channelButton: MaterialButton
     private var release: AppUpdateRepository.Release? = null
     private var pendingInstall: File? = null
-    private var awaitingChannelReturn = false
     private var work: Job? = null
+
+    // No membership service is configured yet. Never infer access from a channel visit,
+    // saved activity state, or a local preference. A verified server proof must replace this.
+    private val hasVerifiedSubscription: Boolean get() = false
 
     private val installPermission =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
@@ -63,7 +66,6 @@ class UpdateActivity : AppCompatActivity() {
         primaryButton.setOnClickListener { handlePrimaryAction() }
         channelButton.setOnClickListener { openChannel() }
         release = restoreRelease(savedInstanceState)
-        awaitingChannelReturn = savedInstanceState?.getBoolean(STATE_AWAITING_CHANNEL) == true
         val restoredApk = savedInstanceState
             ?.getString(STATE_APK_PATH)
             ?.let(::File)
@@ -83,13 +85,7 @@ class UpdateActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        if (awaitingChannelReturn) {
-            awaitingChannelReturn = false
-            release?.let { current ->
-                gatePreferences().edit().putString(GATE_TAG_KEY, current.version).apply()
-                renderAvailable(current)
-            }
-        } else if (pendingInstall != null && work?.isActive != true) {
+        if (pendingInstall != null && work?.isActive != true) {
             primaryButton.isEnabled = true
             primaryButton.setText(R.string.update_install)
         }
@@ -111,7 +107,6 @@ class UpdateActivity : AppCompatActivity() {
             outState.putString(STATE_SHA256, current.sha256)
         }
         outState.putString(STATE_APK_PATH, pendingInstall?.absolutePath)
-        outState.putBoolean(STATE_AWAITING_CHANNEL, awaitingChannelReturn)
         super.onSaveInstanceState(outState)
     }
 
@@ -125,8 +120,8 @@ class UpdateActivity : AppCompatActivity() {
         when {
             pendingInstall != null -> requestInstall(requireNotNull(pendingInstall))
             current == null -> checkForUpdate()
-            !channelOpened(current) -> openChannel()
-            else -> downloadAndInstall(current)
+            // Fail closed until a server can verify membership. Opening Telegram is not proof.
+            else -> openChannel()
         }
     }
 
@@ -157,6 +152,10 @@ class UpdateActivity : AppCompatActivity() {
     }
 
     private fun downloadAndInstall(current: AppUpdateRepository.Release) {
+        if (!hasVerifiedSubscription) {
+            showError(R.string.update_subscription_unavailable)
+            return
+        }
         if (BuildConfig.DEBUG) {
             Toast.makeText(this, R.string.update_debug_build, Toast.LENGTH_LONG).show()
             return
@@ -193,6 +192,10 @@ class UpdateActivity : AppCompatActivity() {
     }
 
     private fun requestInstall(apk: File) {
+        if (!hasVerifiedSubscription) {
+            showError(R.string.update_subscription_unavailable)
+            return
+        }
         val expectedVersion = release?.version ?: run {
             showError(R.string.update_download_failed)
             return
@@ -228,6 +231,10 @@ class UpdateActivity : AppCompatActivity() {
     }
 
     private fun openInstaller(apk: File) {
+        if (!hasVerifiedSubscription) {
+            showError(R.string.update_subscription_unavailable)
+            return
+        }
         runCatching {
             val expectedVersion = release?.version
                 ?: throw IllegalStateException("Release state is missing")
@@ -263,18 +270,15 @@ class UpdateActivity : AppCompatActivity() {
         pendingInstall = null
         progress.visibility = View.GONE
         statusText.visibility = View.VISIBLE
-        statusText.text = getString(R.string.update_available, current.version)
+        statusText.setText(R.string.update_subscription_unavailable)
         versionText.text = getString(
             R.string.update_version_change,
             BuildConfig.VERSION_NAME,
             current.version,
         )
         primaryButton.isEnabled = true
-        primaryButton.setText(
-            if (channelOpened(current)) R.string.update_download_install
-            else R.string.update_open_channel,
-        )
-        channelButton.visibility = if (channelOpened(current)) View.VISIBLE else View.GONE
+        primaryButton.setText(R.string.update_open_channel)
+        channelButton.visibility = View.GONE
         channelButton.isEnabled = true
     }
 
@@ -298,7 +302,6 @@ class UpdateActivity : AppCompatActivity() {
     }
 
     private fun openChannel() {
-        awaitingChannelReturn = release != null
         val uri = Uri.parse(CHANNEL_URL)
         val telegram = Intent(Intent.ACTION_VIEW, uri).setPackage("org.telegram.messenger")
         val opened = runCatching {
@@ -309,15 +312,9 @@ class UpdateActivity : AppCompatActivity() {
             }
         }.isSuccess
         if (!opened) {
-            awaitingChannelReturn = false
             Toast.makeText(this, R.string.update_channel_failed, Toast.LENGTH_SHORT).show()
         }
     }
-
-    private fun channelOpened(current: AppUpdateRepository.Release): Boolean =
-        gatePreferences().getString(GATE_TAG_KEY, null) == current.version
-
-    private fun gatePreferences() = getSharedPreferences(GATE_PREFERENCES, MODE_PRIVATE)
 
     private fun restoreRelease(state: Bundle?): AppUpdateRepository.Release? {
         state ?: return null
@@ -342,8 +339,6 @@ class UpdateActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "UpdateActivity"
         private const val CHANNEL_URL = "https://t.me/Slag0dworld"
-        private const val GATE_PREFERENCES = "update_channel_gate"
-        private const val GATE_TAG_KEY = "opened_for_version"
         private const val STATE_VERSION = "update.version"
         private const val STATE_APK_NAME = "update.apk_name"
         private const val STATE_APK_URL = "update.apk_url"
@@ -352,6 +347,5 @@ class UpdateActivity : AppCompatActivity() {
         private const val STATE_SIZE = "update.size"
         private const val STATE_SHA256 = "update.sha256"
         private const val STATE_APK_PATH = "update.apk_path"
-        private const val STATE_AWAITING_CHANNEL = "update.awaiting_channel"
     }
 }

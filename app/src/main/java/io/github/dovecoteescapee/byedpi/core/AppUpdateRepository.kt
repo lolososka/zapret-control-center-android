@@ -23,6 +23,7 @@ object AppUpdateRepository {
     private const val CONNECT_TIMEOUT_MS = 8_000
     private const val READ_TIMEOUT_MS = 20_000
     private val stableTag = Regex("^android-v(\\d+\\.\\d+\\.\\d+)$")
+    private val stableVersion = Regex("^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$")
     private val sha256Digest = Regex("^sha256:([0-9a-f]{64})$")
 
     data class Release(
@@ -176,15 +177,11 @@ object AppUpdateRepository {
         }
         val candidateCertificates = signingCertificates(candidate)
         val installedCertificates = signingCertificates(installed)
-        val signaturesMatch = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P &&
-            !candidateCertificates.multiple && !installedCertificates.multiple
-        ) {
-            installedCertificates.current.size == 1 &&
-                candidateCertificates.history.contains(installedCertificates.current.single())
-        } else {
-            candidateCertificates.current.isNotEmpty() &&
-                candidateCertificates.current == installedCertificates.current
-        }
+        val signaturesMatch = isTrustedSigningUpdate(
+            candidate = candidateCertificates,
+            installed = installedCertificates,
+            supportsSigningHistory = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P,
+        )
         if (!signaturesMatch) {
             throw IOException("Signing certificate mismatch")
         }
@@ -192,7 +189,7 @@ object AppUpdateRepository {
 
     internal fun isNewerVersion(candidate: String, current: String): Boolean {
         val candidateParts = parseStableVersion(candidate) ?: return false
-        val currentParts = parseStableVersion(current.substringBefore('-')) ?: return false
+        val currentParts = parseStableVersion(current.removeSuffix("-debug")) ?: return false
         for (index in 0..2) {
             if (candidateParts[index] != currentParts[index]) {
                 return candidateParts[index] > currentParts[index]
@@ -202,9 +199,24 @@ object AppUpdateRepository {
     }
 
     private fun parseStableVersion(value: String): List<Int>? {
-        val parts = value.split('.')
-        if (parts.size != 3) return null
-        return parts.map { part -> part.toIntOrNull() ?: return null }
+        val match = stableVersion.matchEntire(value) ?: return null
+        return match.groupValues.drop(1).map { part -> part.toIntOrNull() ?: return null }
+    }
+
+    internal fun isTrustedSigningUpdate(
+        candidate: SigningCertificates,
+        installed: SigningCertificates,
+        supportsSigningHistory: Boolean,
+    ): Boolean {
+        if (candidate.current.isEmpty() || installed.current.isEmpty()) return false
+        if (supportsSigningHistory && !candidate.multiple && !installed.multiple) {
+            // A forward key rotation must carry the installed signer in the
+            // candidate's verified lineage, never the other way around.
+            return candidate.current.size == 1 && installed.current.size == 1 &&
+                candidate.history.containsAll(candidate.current) &&
+                candidate.history.contains(installed.current.single())
+        }
+        return candidate.current == installed.current
     }
 
     private fun downloadChecksum(url: String): String {
@@ -299,8 +311,7 @@ object AppUpdateRepository {
         return output.toByteArray()
     }
 
-    @Suppress("DEPRECATION")
-    private data class SigningCertificates(
+    internal data class SigningCertificates(
         val current: Set<String>,
         val history: Set<String>,
         val multiple: Boolean,

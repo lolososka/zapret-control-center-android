@@ -150,6 +150,7 @@
     <string name="update_checking">Проверка…</string>
     <string name="update_current">Установлена последняя версия</string>
     <string name="update_available">Доступна версия %1$s</string>
+    <string name="update_subscription_unavailable">Проверка подписки пока недоступна. Обновление — в канале.</string>
     <string name="update_open_channel">Открыть @Slag0dworld</string>
     <string name="update_channel">Канал обновлений</string>
     <string name="update_download_install">Скачать и установить</string>

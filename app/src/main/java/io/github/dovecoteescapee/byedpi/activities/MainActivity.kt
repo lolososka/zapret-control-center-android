@@ -33,6 +33,7 @@ import io.github.dovecoteescapee.byedpi.data.*
 import io.github.dovecoteescapee.byedpi.fragments.MainSettingsFragment
 import io.github.dovecoteescapee.byedpi.databinding.ActivityMainBinding
 import io.github.dovecoteescapee.byedpi.core.StrategyProfiles
+import io.github.dovecoteescapee.byedpi.core.StrategyProbeResult
 import io.github.dovecoteescapee.byedpi.core.ByeDpiProxyPreferences
 import io.github.dovecoteescapee.byedpi.core.ByeDpiProxyUIPreferences
 import io.github.dovecoteescapee.byedpi.core.ConnectionDiagnostics
@@ -90,18 +91,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private data class ProbeTarget(val host: String, val product: String)
-
-    private data class ProbeResult(
-        val successes: Int,
-        val products: Int,
-        val latencyMs: Long,
-    ) {
-        fun isBetterThan(other: ProbeResult?): Boolean = when {
-            other == null -> true
-            successes != other.successes -> successes > other.successes
-            else -> latencyMs < other.latencyMs
-        }
-    }
 
     private fun collectLogs(minimal: Boolean): String? = try {
         val preferences = getPreferences()
@@ -487,14 +476,14 @@ class MainActivity : AppCompatActivity() {
                 }.distinct()
 
                 var selected: StrategyProfiles.Profile? = null
-                var selectedResult: ProbeResult? = null
+                var selectedResult: StrategyProbeResult? = null
                 var runningCandidate: StrategyProfiles.Profile? = null
                 for ((index, candidate) in candidates.withIndex()) {
                     runningCandidate = null
                     if (!startProxyCandidate(candidate)) continue
                     runningCandidate = candidate
                     val result = probeBlockedEndpoints(proxyIp, proxyPort)
-                    if (result.products >= MIN_PROBE_PRODUCTS &&
+                    if (result.isEligible(MIN_PROBE_PRODUCTS) &&
                         result.isBetterThan(selectedResult)
                     ) {
                         selected = candidate
@@ -607,19 +596,14 @@ class MainActivity : AppCompatActivity() {
             (expectedMode == null || appStatus.second == expectedMode)
     }
 
-    private suspend fun probeBlockedEndpoints(proxyIp: String, proxyPort: Int): ProbeResult =
+    private suspend fun probeBlockedEndpoints(proxyIp: String, proxyPort: Int): StrategyProbeResult =
         coroutineScope {
             val results = PROBE_TARGETS.map { target ->
                 async(Dispatchers.IO) {
                     target.product to probeEndpoint(proxyIp, proxyPort, target.host)
                 }
             }.awaitAll()
-            val successful = results.filter { it.second != null }
-            ProbeResult(
-                successes = successful.size,
-                products = successful.map { it.first }.distinct().size,
-                latencyMs = successful.mapNotNull { it.second }.sum(),
-            )
+            StrategyProbeResult.fromEndpointResults(results)
         }
 
     private fun probeEndpoint(proxyIp: String, proxyPort: Int, host: String): Long? {
