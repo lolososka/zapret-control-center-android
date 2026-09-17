@@ -13,12 +13,12 @@ Zapret Mobile является форком открытого проекта [B
 
 | Компонент | Зафиксированная ревизия | Лицензия | Где находится текст |
 | --- | --- | --- | --- |
-| [ByeDPI](https://github.com/hufrea/byedpi) | `v0.13` / `078842b084853bc30f33eaaec7acc510cf67e560` | MIT | [`app/src/main/cpp/byedpi/LICENSE`](app/src/main/cpp/byedpi/LICENSE) |
-| [hev-socks5-tunnel](https://github.com/heiher/hev-socks5-tunnel) | `2.7.4` / `677bb4530cfc867cd44d88d298960c8d8d9fbfad` | MIT | [`app/src/main/jni/hev-socks5-tunnel/License`](app/src/main/jni/hev-socks5-tunnel/License) |
-| hev-socks5-tunnel core | `103d99705afcc7663a7e7dcee11a94850da263e0` | MIT | [`app/src/main/jni/hev-socks5-tunnel/src/core/License`](app/src/main/jni/hev-socks5-tunnel/src/core/License) |
-| [hev-task-system](https://github.com/heiher/hev-task-system) | `5.3.2` / `b2be0b33a236b4776ff92425f61bfa12b2a2a6fd` | MIT | [`app/src/main/jni/hev-socks5-tunnel/third-part/hev-task-system/License`](app/src/main/jni/hev-socks5-tunnel/third-part/hev-task-system/License) |
-| [lwIP](https://savannah.nongnu.org/projects/lwip/) | `9f5fa882d5a2675aae9907be21b463359ba8b632` | BSD 3-Clause | [`app/src/main/jni/hev-socks5-tunnel/third-part/lwip/License`](app/src/main/jni/hev-socks5-tunnel/third-part/lwip/License) |
-| libyaml (в составе туннеля) | `162227cd7d2b6108bc8bc133273e11413222ddf4` | MIT | [`app/src/main/jni/hev-socks5-tunnel/third-part/yaml/License`](app/src/main/jni/hev-socks5-tunnel/third-part/yaml/License) |
+| [ByeDPI](https://github.com/lolososka/byedpi) (на основе [hufrea/byedpi](https://github.com/hufrea/byedpi)) | `v0.13 + UDP patch` / `86348a4e1965039cb5df8aa5332154f50302679e` | MIT | [`app/src/main/cpp/byedpi/LICENSE`](app/src/main/cpp/byedpi/LICENSE) |
+| [hev-socks5-tunnel](https://github.com/heiher/hev-socks5-tunnel) | `2.17.1` / `9a06bc6e7989da54e3d32ff701ef7a7ce4995d3a` | MIT | [`app/src/main/jni/hev-socks5-tunnel/LICENSE`](app/src/main/jni/hev-socks5-tunnel/LICENSE) |
+| hev-socks5-tunnel core | `1.6.4` / `162dd996299fc2d2bff2dd63728f8a2cd71ed31a` | MIT | [`app/src/main/jni/hev-socks5-tunnel/src/core/LICENSE`](app/src/main/jni/hev-socks5-tunnel/src/core/LICENSE) |
+| [hev-task-system](https://github.com/heiher/hev-task-system) | `5.10.3` / `328f35d903221b51811b3d02b277d665dfbdc75f` | MIT | [`app/src/main/jni/hev-socks5-tunnel/third-part/hev-task-system/LICENSE`](app/src/main/jni/hev-socks5-tunnel/third-part/hev-task-system/LICENSE) |
+| [lwIP](https://savannah.nongnu.org/projects/lwip/) | `2.2.1.7` / `2a11c14c7a32887af25a034e82ef18b0b12076ac` | BSD 3-Clause | [`app/src/main/jni/hev-socks5-tunnel/third-part/lwip/LICENSE`](app/src/main/jni/hev-socks5-tunnel/third-part/lwip/LICENSE) |
+| libyaml (в составе туннеля) | `0.2.5.2` / `efa36117a8646d26d12b58e05bac472d7854a70d` | MIT | [`app/src/main/jni/hev-socks5-tunnel/third-part/yaml/LICENSE`](app/src/main/jni/hev-socks5-tunnel/third-part/yaml/LICENSE) |
 | KAVL header by Attractive Chaos | включён в ByeDPI | MIT | [`app/src/main/cpp/byedpi/kavl.h`](app/src/main/cpp/byedpi/kavl.h) |
 | [tg-ws-proxy](https://github.com/amurcanov/tg-ws-proxy-android) / Flowseal core | snapshot used by Zapret Mobile 0.2.0 | GPL-3.0 (core derived from MIT Flowseal code) | [`third_party/tg-ws-proxy/LICENSE`](third_party/tg-ws-proxy/LICENSE), [`third_party/tg-ws-proxy/src`](third_party/tg-ws-proxy/src) |
 

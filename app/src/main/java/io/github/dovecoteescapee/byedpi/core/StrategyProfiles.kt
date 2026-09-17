@@ -7,6 +7,8 @@ import io.github.dovecoteescapee.byedpi.R
 object StrategyProfiles {
     const val KEY = "byedpi_strategy_profile"
     const val ACTIVE_KEY = "byedpi_strategy_active_profile"
+    private const val CONFIG_VERSION_KEY = "byedpi_strategy_config_version"
+    private const val CONFIG_VERSION = 1
     private const val DEFAULT_ID = "balanced"
 
     enum class Profile(
@@ -43,6 +45,8 @@ object StrategyProfiles {
             false,
             8,
             0,
+            true,
+            1,
         ),
         Messaging(
             "messaging",
@@ -80,7 +84,12 @@ object StrategyProfiles {
             true,
             8,
             0,
-        ),
+            true,
+            1,
+        );
+
+        val mediaReady: Boolean
+            get() = desyncUdp && udpFakeCount > 0
     }
 
     fun selected(preferences: SharedPreferences): Profile =
@@ -101,6 +110,19 @@ object StrategyProfiles {
         writeConfiguration(preferences, selected = profile, active = active)
     }
 
+    /** Rewrites old presets once so upgrades receive the current UDP settings. */
+    fun migrateIfNeeded(preferences: SharedPreferences) {
+        if (preferences.getInt(CONFIG_VERSION_KEY, 0) >= CONFIG_VERSION) return
+        if (preferences.getBoolean("byedpi_enable_cmd_settings", false)) {
+            preferences.edit().putInt(CONFIG_VERSION_KEY, CONFIG_VERSION).apply()
+            return
+        }
+
+        val selected = selected(preferences)
+        val active = if (selected == Profile.Auto) active(preferences) else selected
+        writeConfiguration(preferences, selected, active)
+    }
+
     fun applyAutoCandidate(preferences: SharedPreferences, profile: Profile) {
         require(profile != Profile.Auto) { "Auto cannot be used as its own candidate" }
         writeConfiguration(preferences, selected = Profile.Auto, active = profile)
@@ -119,6 +141,7 @@ object StrategyProfiles {
         val editor = preferences.edit()
             .putString(KEY, selected.id)
             .putString(ACTIVE_KEY, active.id)
+            .putInt(CONFIG_VERSION_KEY, CONFIG_VERSION)
         writeActiveConfiguration(editor, active).apply()
     }
 

@@ -34,6 +34,7 @@ import io.github.dovecoteescapee.byedpi.fragments.MainSettingsFragment
 import io.github.dovecoteescapee.byedpi.databinding.ActivityMainBinding
 import io.github.dovecoteescapee.byedpi.core.StrategyProfiles
 import io.github.dovecoteescapee.byedpi.core.StrategyProbeResult
+import io.github.dovecoteescapee.byedpi.core.Socks5UdpProbe
 import io.github.dovecoteescapee.byedpi.core.ByeDpiProxyPreferences
 import io.github.dovecoteescapee.byedpi.core.ByeDpiProxyUIPreferences
 import io.github.dovecoteescapee.byedpi.core.ConnectionDiagnostics
@@ -82,12 +83,20 @@ class MainActivity : AppCompatActivity() {
         const val EXTRA_AUTO_START = "io.github.lolososka.zapretmobile.AUTO_START"
         private val TAG: String = MainActivity::class.java.simpleName
         private val PROBE_TARGETS = listOf(
-            ProbeTarget("discord.com", "discord"),
-            ProbeTarget("gateway.discord.gg", "discord"),
-            ProbeTarget("www.youtube.com", "youtube"),
+            ProbeTarget("discord.com", "discord-core"),
+            ProbeTarget("gateway.discord.gg", "discord-gateway"),
+            ProbeTarget("discord.media", "discord-media"),
+            ProbeTarget("www.youtube.com", "youtube-core"),
+            ProbeTarget("redirector.googlevideo.com", "youtube-media"),
+            ProbeTarget("youtubei.googleapis.com", "youtube-api"),
             ProbeTarget("telegram.org", "telegram"),
         )
-        private const val MIN_PROBE_PRODUCTS = 3
+        private val REQUIRED_PROBE_PRODUCTS = setOf("discord-core", "youtube-core")
+        private val PRIORITY_PROBE_PRODUCTS = setOf(
+            "discord-gateway",
+            "discord-media",
+            "youtube-media",
+        )
     }
 
     private data class ProbeTarget(val host: String, val product: String)
@@ -469,10 +478,11 @@ class MainActivity : AppCompatActivity() {
                     ?.takeIf { it in 1..65535 }
                     ?: 1080
                 val candidates = buildList {
-                    if (previousActive != StrategyProfiles.Profile.Games) add(previousActive)
-                    add(StrategyProfiles.Profile.Balanced)
+                    add(previousActive)
                     add(StrategyProfiles.Profile.Strong)
                     add(StrategyProfiles.Profile.Messaging)
+                    add(StrategyProfiles.Profile.Games)
+                    add(StrategyProfiles.Profile.Balanced)
                 }.distinct()
 
                 var selected: StrategyProfiles.Profile? = null
@@ -483,15 +493,25 @@ class MainActivity : AppCompatActivity() {
                     if (!startProxyCandidate(candidate)) continue
                     runningCandidate = candidate
                     val result = probeBlockedEndpoints(proxyIp, proxyPort)
-                    if (result.isEligible(MIN_PROBE_PRODUCTS) &&
-                        result.isBetterThan(selectedResult)
+                    if (result.isEligible(REQUIRED_PROBE_PRODUCTS) &&
+                        result.isBetterThan(
+                            selectedResult,
+                            PRIORITY_PROBE_PRODUCTS,
+                            mediaReady = candidate.mediaReady,
+                            otherMediaReady = selected?.mediaReady == true,
+                        )
                     ) {
                         selected = candidate
                         selectedResult = result
                     }
-                    // The last known profile is revalidated first. A clean
-                    // result avoids needless service restarts on every launch.
-                    if (index == 0 && result.successes == PROBE_TARGETS.size) break
+                    // Reuse the last profile only after both media hosts and
+                    // the UDP relay are healthy. A frontend-only TLS success is
+                    // not enough for YouTube playback or Discord calls.
+                    if (index == 0 &&
+                        candidate.mediaReady &&
+                        result.udpLatencyMs != null &&
+                        result.successes == PROBE_TARGETS.size
+                    ) break
                 }
 
                 val chosen = selected ?: previousActive
@@ -598,12 +618,18 @@ class MainActivity : AppCompatActivity() {
 
     private suspend fun probeBlockedEndpoints(proxyIp: String, proxyPort: Int): StrategyProbeResult =
         coroutineScope {
-            val results = PROBE_TARGETS.map { target ->
+            val endpoints = PROBE_TARGETS.map { target ->
                 async(Dispatchers.IO) {
                     target.product to probeEndpoint(proxyIp, proxyPort, target.host)
                 }
-            }.awaitAll()
-            StrategyProbeResult.fromEndpointResults(results)
+            }
+            val udp = async(Dispatchers.IO) {
+                Socks5UdpProbe.probe(proxyIp, proxyPort)
+            }
+            StrategyProbeResult.fromEndpointResults(
+                endpoints.awaitAll(),
+                udpLatencyMs = udp.await(),
+            )
         }
 
     private fun probeEndpoint(proxyIp: String, proxyPort: Int, host: String): Long? {

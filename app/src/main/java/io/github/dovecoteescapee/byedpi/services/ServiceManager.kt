@@ -7,11 +7,14 @@ import androidx.core.content.ContextCompat
 import io.github.dovecoteescapee.byedpi.data.Mode
 import io.github.dovecoteescapee.byedpi.data.START_ACTION
 import io.github.dovecoteescapee.byedpi.data.STOP_ACTION
+import io.github.dovecoteescapee.byedpi.core.StrategyProfiles
+import io.github.dovecoteescapee.byedpi.utility.getPreferences
 
 object ServiceManager {
     private val TAG: String = ServiceManager::class.java.simpleName
 
     fun start(context: Context, mode: Mode) {
+        StrategyProfiles.migrateIfNeeded(context.getPreferences())
         when (mode) {
             Mode.VPN -> {
                 Log.i(TAG, "Starting VPN")

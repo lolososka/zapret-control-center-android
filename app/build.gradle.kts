@@ -21,8 +21,8 @@ android {
         applicationId = "io.github.lolososka.zapretmobile"
         minSdk = 21
         targetSdk = 34
-        versionCode = 21
-        versionName = "0.3.0"
+        versionCode = 22
+        versionName = "0.3.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -123,9 +123,9 @@ tasks.register<Copy>("prepareLicenseAssets") {
     from(rootProject.file("THIRD_PARTY_NOTICES.md"))
     from("src/main/cpp/byedpi/LICENSE") { rename { "ByeDPI-MIT.txt" } }
     from("src/main/cpp/byedpi/kavl.h") { rename { "KAVL-notice.txt" } }
-    from("src/main/jni/hev-socks5-tunnel/License") { rename { "hev-socks5-tunnel-MIT.txt" } }
-    from("src/main/jni/hev-socks5-tunnel/src/core/License") { rename { "hev-core-MIT.txt" } }
-    from("src/main/jni/hev-socks5-tunnel/third-part/hev-task-system/License") { rename { "hev-task-system-MIT.txt" } }
-    from("src/main/jni/hev-socks5-tunnel/third-part/lwip/License") { rename { "lwIP-BSD.txt" } }
-    from("src/main/jni/hev-socks5-tunnel/third-part/yaml/License") { rename { "libyaml-MIT.txt" } }
+    from("src/main/jni/hev-socks5-tunnel/LICENSE") { rename { "hev-socks5-tunnel-MIT.txt" } }
+    from("src/main/jni/hev-socks5-tunnel/src/core/LICENSE") { rename { "hev-core-MIT.txt" } }
+    from("src/main/jni/hev-socks5-tunnel/third-part/hev-task-system/LICENSE") { rename { "hev-task-system-MIT.txt" } }
+    from("src/main/jni/hev-socks5-tunnel/third-part/lwip/LICENSE") { rename { "lwIP-BSD.txt" } }
+    from("src/main/jni/hev-socks5-tunnel/third-part/yaml/LICENSE") { rename { "libyaml-MIT.txt" } }
 }

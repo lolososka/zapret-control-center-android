@@ -136,7 +136,7 @@
     <string name="strategy_balanced">Баланс</string>
     <string name="strategy_strong">Максимум</string>
     <string name="strategy_applied_restart">Стратегия применена. Перезапуск…</string>
-    <string name="strategy_messaging">Мессенджеры</string>
+    <string name="strategy_messaging">Видео и звонки</string>
     <string name="strategy_games">Игровой трафик</string>
     <string name="strategy_auto_checking">Подбор стратегии…</string>
     <string name="strategy_auto_waiting">Прокси не остановился. Повторите попытку.</string>

@@ -37,8 +37,36 @@ class StrategyPreferencesTest {
 
         StrategyProfiles.apply(preferences, StrategyProfiles.Profile.Balanced)
         val balanced = ByeDpiProxyUIPreferences(preferences)
-        assertFalse(balanced.desyncUdp)
-        assertEquals(0, balanced.udpFakeCount)
+        assertTrue(balanced.desyncUdp)
+        assertEquals(1, balanced.udpFakeCount)
+    }
+
+    @Test
+    fun maximumProfileCoversVideoAndVoiceUdp() {
+        preferences.edit().clear().commit()
+
+        StrategyProfiles.apply(preferences, StrategyProfiles.Profile.Strong)
+        val strong = ByeDpiProxyUIPreferences(preferences)
+
+        assertTrue(strong.desyncUdp)
+        assertEquals(1, strong.udpFakeCount)
+        assertTrue(StrategyProfiles.Profile.Strong.mediaReady)
+    }
+
+    @Test
+    fun oldBalancedPresetIsMigratedToMediaSettings() {
+        preferences.edit()
+            .clear()
+            .putString(StrategyProfiles.KEY, StrategyProfiles.Profile.Balanced.id)
+            .putBoolean("byedpi_desync_udp", false)
+            .putString("byedpi_udp_fake_count", "0")
+            .commit()
+
+        StrategyProfiles.migrateIfNeeded(preferences)
+
+        val migrated = ByeDpiProxyUIPreferences(preferences)
+        assertTrue(migrated.desyncUdp)
+        assertEquals(1, migrated.udpFakeCount)
     }
 
     @Test

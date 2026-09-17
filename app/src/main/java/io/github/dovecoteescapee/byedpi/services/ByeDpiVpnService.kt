@@ -259,13 +259,19 @@ class ByeDpiVpnService : LifecycleVpnService() {
         val ipv6 = sharedPreferences.getBoolean("ipv6_enable", false)
 
         val tun2socksConfig = """
-        | misc:
-        |   task-stack-size: 81920
-        | socks5:
+        | tunnel:
         |   mtu: 8500
+        |
+        | socks5:
         |   address: 127.0.0.1
         |   port: $port
         |   udp: udp
+        |
+        | misc:
+        |   task-stack-size: 86016
+        |   udp-recv-buffer-size: 1048576
+        |   udp-copy-buffer-nums: 32
+        |   udp-read-write-timeout: 120000
         """.trimMargin("| ")
 
         val configPath = try {
@@ -283,7 +289,9 @@ class ByeDpiVpnService : LifecycleVpnService() {
 
         this.tunFd = fd
 
-        TProxyService.TProxyStartService(configPath.absolutePath, fd.fd)
+        if (!TProxyService.TProxyStartService(configPath.absolutePath, fd.fd)) {
+            throw IllegalStateException("Tun2socks did not start")
+        }
 
         Log.i(TAG, "Tun2Socks started")
     }
@@ -313,7 +321,11 @@ class ByeDpiVpnService : LifecycleVpnService() {
         if (fd == null) {
             Log.w(TAG, "VPN is not running")
         } else {
-            cleanup("stop native tun2socks") { TProxyService.TProxyStopService() }
+            cleanup("stop native tun2socks") {
+                if (!TProxyService.TProxyStopService()) {
+                    throw IllegalStateException("Tun2socks did not stop cleanly")
+                }
+            }
             cleanup("close VPN descriptor") { fd.close() }
         }
 
