@@ -3,9 +3,9 @@
 [![Android CI](https://github.com/lolososka/zapret-control-center-android/actions/workflows/android-ci.yml/badge.svg)](https://github.com/lolososka/zapret-control-center-android/actions/workflows/android-ci.yml)
 [![Лицензия: GPL v3](https://img.shields.io/badge/license-GPLv3-151515.svg)](LICENSE)
 
-Android-приложение от **lolososka** в стиле Zapret Control Center. Оно запускает локальный VPN-интерфейс Android и направляет трафик через локальный SOCKS5-прокси [ByeDPI](https://github.com/hufrea/byedpi). Root-права не нужны.
+Android-приложение от **lolososka** в стиле Zapret Control Center. Оно запускает локальный VPN-интерфейс Android и направляет трафик через встроенный в APK [форк ByeDPI](https://github.com/lolososka/byedpi). Отдельное приложение или удалённый VPN-сервер не запускаются, root-права не нужны.
 
-> 0.1.9 — профиль «Авто» проверяет стратегии через локальный SOCKS5 до Telegram и оставляет первый рабочий вариант. Подписанный APK публикуется в Releases после автоматических проверок. Работа обхода на конкретном телефоне и у конкретного провайдера требует проверки.
+> 0.3.2 — профиль «Авто» проверяет кандидатов во внутренней временной сессии, не переключая VPN на видимый режим локального прокси. Подписанный APK публикуется в Releases после автоматических проверок. Работа обхода на конкретном телефоне и у конкретного провайдера требует проверки.
 
 Профиль «Мессенджеры» помогает соединениям с нестабильным UDP, а «Игровой трафик» включает консервативную обработку UDP без привязки к отдельному сервису.
 
@@ -57,7 +57,7 @@ Debug APK появится в `app/build/outputs/apk/debug/`.
 Основные компоненты:
 
 - [ByeDPIAndroid](https://github.com/dovecoteescapee/ByeDPIAndroid) — исходная Android-реализация;
-- [ByeDPI](https://github.com/hufrea/byedpi) — локальный SOCKS5-прокси и DPI-десинхронизация;
+- [форк ByeDPI](https://github.com/lolososka/byedpi) на основе [hufrea/byedpi](https://github.com/hufrea/byedpi) — встроенный локальный SOCKS5-прокси и DPI-десинхронизация;
 - [hev-socks5-tunnel](https://github.com/heiher/hev-socks5-tunnel) — туннель между Android VPN и SOCKS5.
 
 Название Zapret Mobile относится к этому форку. Приложение не является официальным клиентом проектов ByeDPI, ByeDPIAndroid или `bol-van/zapret` и не содержит Windows-компоненты WinDivert.

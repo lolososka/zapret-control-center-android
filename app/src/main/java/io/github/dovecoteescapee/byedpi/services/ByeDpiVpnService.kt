@@ -41,6 +41,8 @@ class ByeDpiVpnService : LifecycleVpnService() {
     private var stopping: Boolean = false
     private var startCommandPending: Boolean = false
     private var stopCommandPending: Boolean = false
+    private val startOperationIds = linkedSetOf<Long>()
+    private val stopOperationIds = linkedSetOf<Long>()
 
     companion object {
         private val TAG: String = ByeDpiVpnService::class.java.simpleName
@@ -70,6 +72,14 @@ class ByeDpiVpnService : LifecycleVpnService() {
                 // Android requires a service launched through startForegroundService()
                 // to become foreground promptly, before native startup work begins.
                 startForeground()
+                val operationId = intent.getLongExtra(OPERATION_ID, 0L).takeIf { it > 0L }
+                if (status == ServiceStatus.Connected) {
+                    operationId?.let {
+                        sendStatusBroadcast(ServiceStatus.Connected, listOf(it))
+                    }
+                } else {
+                    operationId?.let(startOperationIds::add)
+                }
                 if (!startCommandPending && status != ServiceStatus.Connected) {
                     startCommandPending = true
                     serviceScope.launch {
@@ -88,6 +98,9 @@ class ByeDpiVpnService : LifecycleVpnService() {
                 // Publishing the notification first keeps this path valid even if the
                 // process/service was recreated before handling the command.
                 startForeground()
+                intent.getLongExtra(OPERATION_ID, 0L)
+                    .takeIf { it > 0L }
+                    ?.let(stopOperationIds::add)
                 if (!stopCommandPending) {
                     stopCommandPending = true
                     serviceScope.launch {
@@ -115,6 +128,11 @@ class ByeDpiVpnService : LifecycleVpnService() {
 
     override fun onDestroy() {
         destroyed = true
+        if (proxySession == null && proxyJob == null && tunFd == null) {
+            serviceScope.cancel()
+            super.onDestroy()
+            return
+        }
         serviceScope.launch {
             try {
                 stop(if (status == ServiceStatus.Failed) status else ServiceStatus.Disconnected)
@@ -359,15 +377,45 @@ class ByeDpiVpnService : LifecycleVpnService() {
             Mode.VPN
         )
 
-        val intent = Intent(
-            when (newStatus) {
-                ServiceStatus.Connected -> STARTED_BROADCAST
-                ServiceStatus.Disconnected -> STOPPED_BROADCAST
-                ServiceStatus.Failed -> FAILED_BROADCAST
+        val operationIds = when (newStatus) {
+            ServiceStatus.Connected -> startOperationIds.toList()
+            ServiceStatus.Disconnected -> stopOperationIds.toList()
+            ServiceStatus.Failed -> (startOperationIds + stopOperationIds).toList()
+        }
+        sendStatusBroadcast(newStatus, operationIds)
+        when (newStatus) {
+            ServiceStatus.Connected -> startOperationIds.clear()
+            ServiceStatus.Disconnected -> stopOperationIds.clear()
+            ServiceStatus.Failed -> {
+                startOperationIds.clear()
+                stopOperationIds.clear()
             }
-        )
-        intent.putExtra(SENDER, Sender.VPN.ordinal)
-        sendBroadcast(intent.setPackage(packageName))
+        }
+    }
+
+    private fun sendStatusBroadcast(newStatus: ServiceStatus, operationIds: Collection<Long>) {
+        val action = when (newStatus) {
+            ServiceStatus.Connected -> STARTED_BROADCAST
+            ServiceStatus.Disconnected -> STOPPED_BROADCAST
+            ServiceStatus.Failed -> FAILED_BROADCAST
+        }
+        val ids = operationIds.distinct()
+        if (ids.isEmpty()) {
+            sendBroadcast(
+                Intent(action)
+                    .putExtra(SENDER, Sender.VPN.ordinal)
+                    .setPackage(packageName),
+            )
+            return
+        }
+        ids.forEach { operationId ->
+            sendBroadcast(
+                Intent(action)
+                    .putExtra(SENDER, Sender.VPN.ordinal)
+                    .putExtra(OPERATION_ID, operationId)
+                    .setPackage(packageName),
+            )
+        }
     }
 
     private fun createNotification(): Notification =

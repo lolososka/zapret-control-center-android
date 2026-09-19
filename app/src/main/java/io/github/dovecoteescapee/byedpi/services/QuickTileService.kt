@@ -18,6 +18,7 @@ import androidx.core.service.quicksettings.TileServiceCompat
 import io.github.dovecoteescapee.byedpi.R
 import io.github.dovecoteescapee.byedpi.activities.MainActivity
 import io.github.dovecoteescapee.byedpi.core.StrategyProfiles
+import io.github.dovecoteescapee.byedpi.core.StrategyProbeCoordinator
 import io.github.dovecoteescapee.byedpi.data.*
 import io.github.dovecoteescapee.byedpi.utility.getPreferences
 import io.github.dovecoteescapee.byedpi.utility.mode
@@ -102,11 +103,19 @@ class QuickTileService : TileService() {
     }
 
     private fun updateStatus() {
+        if (StrategyProbeCoordinator.isActive || ServiceTransitionCoordinator.isActive) {
+            setState(Tile.STATE_UNAVAILABLE)
+            return
+        }
         val (status) = appStatus
         setState(if (status == AppStatus.Halted) Tile.STATE_INACTIVE else Tile.STATE_ACTIVE)
     }
 
     private fun handleClick() {
+        if (StrategyProbeCoordinator.isActive || ServiceTransitionCoordinator.isActive) {
+            updateStatus()
+            return
+        }
         setState(Tile.STATE_ACTIVE)
         setState(Tile.STATE_UNAVAILABLE)
 
@@ -119,7 +128,7 @@ class QuickTileService : TileService() {
 
                 if (mode == Mode.VPN && VpnService.prepare(this) != null) {
                     updateStatus()
-                    launchActivity(autoStart = autoSelected)
+                    launchActivity(autoStart = true)
                     return
                 }
 
@@ -129,10 +138,10 @@ class QuickTileService : TileService() {
                     return
                 }
 
-                ServiceManager.start(this, mode)
+                ServiceTransitionCoordinator.beginStart(this, mode)
             }
 
-            AppStatus.Running -> ServiceManager.stop(this)
+            AppStatus.Running -> ServiceTransitionCoordinator.beginStop(this, appStatus.second)
         }
     }
 }

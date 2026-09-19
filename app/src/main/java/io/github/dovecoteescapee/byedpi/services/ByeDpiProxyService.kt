@@ -35,6 +35,8 @@ class ByeDpiProxyService : LifecycleService() {
     private var stopping: Boolean = false
     private var startCommandPending: Boolean = false
     private var stopCommandPending: Boolean = false
+    private val startOperationIds = linkedSetOf<Long>()
+    private val stopOperationIds = linkedSetOf<Long>()
 
     companion object {
         private val TAG: String = ByeDpiProxyService::class.java.simpleName
@@ -64,6 +66,14 @@ class ByeDpiProxyService : LifecycleService() {
                 // Enter foreground before native setup so Android's startup deadline
                 // cannot kill the service on a slower device.
                 startForeground()
+                val operationId = intent.getLongExtra(OPERATION_ID, 0L).takeIf { it > 0L }
+                if (status == ServiceStatus.Connected) {
+                    operationId?.let {
+                        sendStatusBroadcast(ServiceStatus.Connected, listOf(it))
+                    }
+                } else {
+                    operationId?.let(startOperationIds::add)
+                }
                 if (!startCommandPending && status != ServiceStatus.Connected) {
                     startCommandPending = true
                     serviceScope.launch {
@@ -79,6 +89,9 @@ class ByeDpiProxyService : LifecycleService() {
 
             STOP_ACTION -> {
                 startForeground()
+                intent.getLongExtra(OPERATION_ID, 0L)
+                    .takeIf { it > 0L }
+                    ?.let(stopOperationIds::add)
                 if (!stopCommandPending) {
                     stopCommandPending = true
                     serviceScope.launch {
@@ -101,6 +114,11 @@ class ByeDpiProxyService : LifecycleService() {
 
     override fun onDestroy() {
         destroyed = true
+        if (proxySession == null && proxyJob == null) {
+            serviceScope.cancel()
+            super.onDestroy()
+            return
+        }
         // LifecycleService cancels lifecycleScope at destruction. Keep teardown
         // alive until the blocking native worker has released its resources.
         serviceScope.launch {
@@ -243,15 +261,45 @@ class ByeDpiProxyService : LifecycleService() {
             Mode.Proxy
         )
 
-        val intent = Intent(
-            when (newStatus) {
-                ServiceStatus.Connected -> STARTED_BROADCAST
-                ServiceStatus.Disconnected -> STOPPED_BROADCAST
-                ServiceStatus.Failed -> FAILED_BROADCAST
+        val operationIds = when (newStatus) {
+            ServiceStatus.Connected -> startOperationIds.toList()
+            ServiceStatus.Disconnected -> stopOperationIds.toList()
+            ServiceStatus.Failed -> (startOperationIds + stopOperationIds).toList()
+        }
+        sendStatusBroadcast(newStatus, operationIds)
+        when (newStatus) {
+            ServiceStatus.Connected -> startOperationIds.clear()
+            ServiceStatus.Disconnected -> stopOperationIds.clear()
+            ServiceStatus.Failed -> {
+                startOperationIds.clear()
+                stopOperationIds.clear()
             }
-        )
-        intent.putExtra(SENDER, Sender.Proxy.ordinal)
-        sendBroadcast(intent.setPackage(packageName))
+        }
+    }
+
+    private fun sendStatusBroadcast(newStatus: ServiceStatus, operationIds: Collection<Long>) {
+        val action = when (newStatus) {
+            ServiceStatus.Connected -> STARTED_BROADCAST
+            ServiceStatus.Disconnected -> STOPPED_BROADCAST
+            ServiceStatus.Failed -> FAILED_BROADCAST
+        }
+        val ids = operationIds.distinct()
+        if (ids.isEmpty()) {
+            sendBroadcast(
+                Intent(action)
+                    .putExtra(SENDER, Sender.Proxy.ordinal)
+                    .setPackage(packageName),
+            )
+            return
+        }
+        ids.forEach { operationId ->
+            sendBroadcast(
+                Intent(action)
+                    .putExtra(SENDER, Sender.Proxy.ordinal)
+                    .putExtra(OPERATION_ID, operationId)
+                    .setPackage(packageName),
+            )
+        }
     }
 
     private fun createNotification(): Notification =

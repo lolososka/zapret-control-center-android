@@ -5,6 +5,7 @@ const val STOPPED_BROADCAST = "io.github.lolososka.zapretmobile.STOPPED"
 const val FAILED_BROADCAST = "io.github.lolososka.zapretmobile.FAILED"
 
 const val SENDER = "sender"
+const val OPERATION_ID = "operation_id"
 
 enum class Sender(val senderName: String) {
     Proxy("Proxy"),

@@ -133,6 +133,43 @@ object StrategyProfiles {
         writeActiveConfiguration(preferences.edit(), profile).apply()
     }
 
+    /** Builds an isolated probe configuration without publishing a temporary profile. */
+    fun candidatePreferences(
+        base: ByeDpiProxyUIPreferences,
+        profile: Profile,
+    ): ByeDpiProxyUIPreferences {
+        require(profile != Profile.Auto) { "Auto cannot be used as its own candidate" }
+        return ByeDpiProxyUIPreferences(
+            ip = base.ip,
+            port = base.port,
+            maxConnections = base.maxConnections,
+            bufferSize = base.bufferSize,
+            defaultTtl = base.defaultTtl.takeIf { base.customTtl },
+            noDomain = base.noDomain,
+            desyncHttp = true,
+            desyncHttps = true,
+            desyncUdp = profile.desyncUdp,
+            desyncMethod = ByeDpiProxyUIPreferences.DesyncMethod.fromName(profile.method),
+            splitPosition = profile.splitPosition,
+            splitAtHost = profile.splitAtHost,
+            fakeTtl = profile.fakeTtl,
+            fakeSni = base.fakeSni,
+            oobChar = (base.oobChar.toInt() and 0xff).toChar().toString(),
+            hostMixedCase = base.hostMixedCase,
+            domainMixedCase = base.domainMixedCase,
+            hostRemoveSpaces = base.hostRemoveSpaces,
+            tlsRecordSplit = profile.tlsRecordSplit,
+            tlsRecordSplitPosition = 1,
+            tlsRecordSplitAtSni = profile.tlsRecordSplitAtSni,
+            hostsMode = base.hostsMode,
+            hosts = base.hosts,
+            tcpFastOpen = base.tcpFastOpen,
+            udpFakeCount = profile.udpFakeCount,
+            dropSack = base.dropSack,
+            byedpiFakeOffset = profile.fakeOffset,
+        )
+    }
+
     private fun writeConfiguration(
         preferences: SharedPreferences,
         selected: Profile,

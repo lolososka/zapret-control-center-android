@@ -26,32 +26,40 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import io.github.dovecoteescapee.byedpi.R
 import io.github.dovecoteescapee.byedpi.BuildConfig
 import io.github.dovecoteescapee.byedpi.data.*
 import io.github.dovecoteescapee.byedpi.fragments.MainSettingsFragment
 import io.github.dovecoteescapee.byedpi.databinding.ActivityMainBinding
 import io.github.dovecoteescapee.byedpi.core.StrategyProfiles
+import io.github.dovecoteescapee.byedpi.core.StrategyProbeCoordinator
 import io.github.dovecoteescapee.byedpi.core.StrategyProbeResult
+import io.github.dovecoteescapee.byedpi.core.StrategyProbeProxyRunner
 import io.github.dovecoteescapee.byedpi.core.Socks5UdpProbe
 import io.github.dovecoteescapee.byedpi.core.ByeDpiProxyPreferences
 import io.github.dovecoteescapee.byedpi.core.ByeDpiProxyUIPreferences
 import io.github.dovecoteescapee.byedpi.core.ConnectionDiagnostics
-import io.github.dovecoteescapee.byedpi.services.ServiceManager
+import io.github.dovecoteescapee.byedpi.services.ServiceTransitionCoordinator
 import io.github.dovecoteescapee.byedpi.services.TelegramWsProxyService
 import io.github.dovecoteescapee.byedpi.services.appStatus
 import io.github.dovecoteescapee.byedpi.utility.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.IOException
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -70,9 +78,11 @@ class MainActivity : AppCompatActivity() {
     private var rxBaseline = 0L
     private var txBaseline = 0L
     @Volatile private var lastPingMs: Long? = null
-    private var pendingMode: Mode? = null
-    private var pendingServiceRestart = false
-    private var restartAfterProfile = false
+    private var restartModeAfterProfile: Mode? = null
+    private val strategyProbeInProgress: Boolean
+        get() = StrategyProbeCoordinator.isActive
+    private val controlsLocked: Boolean
+        get() = strategyProbeInProgress || ServiceTransitionCoordinator.isActive
     private var lastVisualStatus: AppStatus? = null
     private var lastVisualMode: Mode? = null
 
@@ -81,6 +91,7 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         const val EXTRA_AUTO_START = "io.github.lolososka.zapretmobile.AUTO_START"
+        private const val STATE_RESTART_MODE_AFTER_PROFILE = "main.restart_mode_after_profile"
         private val TAG: String = MainActivity::class.java.simpleName
         private val PROBE_TARGETS = listOf(
             ProbeTarget("discord.com", "discord-core"),
@@ -100,7 +111,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private data class ProbeTarget(val host: String, val product: String)
-
     private fun collectLogs(minimal: Boolean): String? = try {
         val preferences = getPreferences()
         val config = runCatching {
@@ -150,9 +160,17 @@ class MainActivity : AppCompatActivity() {
 
     private val vpnRegister =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+            val autoProbeRequest = StrategyProbeCoordinator.takePermissionRequest()
             if (it.resultCode == RESULT_OK) {
-                ServiceManager.start(this, Mode.VPN)
+                if (autoProbeRequest != null) {
+                    startAutoStrategyProbe(
+                        autoProbeRequest.mode,
+                        autoProbeRequest.shouldRunAfterProbe,
+                    )
+                } else ServiceTransitionCoordinator.startPrepared(this)
             } else {
+                if (autoProbeRequest != null) StrategyProbeCoordinator.finish()
+                ServiceTransitionCoordinator.cancelPrepared()
                 Toast.makeText(this, R.string.vpn_permission_denied, Toast.LENGTH_SHORT).show()
                 updateStatus()
             }
@@ -192,26 +210,38 @@ class MainActivity : AppCompatActivity() {
 
     private val profilePickerRegister =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-            val shouldRestart = restartAfterProfile && appStatus.first == AppStatus.Running
-            restartAfterProfile = false
+            val restartMode = restartModeAfterProfile?.takeIf {
+                appStatus.first == AppStatus.Running && appStatus.second == it
+            }
+            restartModeAfterProfile = null
             if (result.resultCode == RESULT_OK) {
                 updateStatus()
                 val preferences = getPreferences()
                 val autoProbeRequested =
                     StrategyProfiles.selected(preferences) == StrategyProfiles.Profile.Auto
                 if (autoProbeRequested) {
-                    val targetMode = preferences.mode()
-                    pendingServiceRestart = false
-                    if (appStatus.first == AppStatus.Running) stop()
-                    startAutoStrategyProbe(targetMode)
-                } else if (shouldRestart) {
-                    pendingServiceRestart = true
+                    val targetMode = restartMode ?: preferences.mode()
+                    preferences.edit()
+                        .putString("byedpi_mode", targetMode.name.lowercase(Locale.ROOT))
+                        .apply()
+                    startAutoStrategyProbeWithPermission(
+                        targetMode,
+                        shouldRunAfterProbe = restartMode != null,
+                    )
+                } else if (restartMode != null) {
+                    preferences.edit()
+                        .putString("byedpi_mode", restartMode.name.lowercase(Locale.ROOT))
+                        .apply()
                     Toast.makeText(
                         this,
                         R.string.strategy_applied_restart,
                         Toast.LENGTH_SHORT,
                     ).show()
-                    stop()
+                    ServiceTransitionCoordinator.beginRestart(
+                        this,
+                        stopMode = restartMode,
+                        startMode = restartMode,
+                    )
                 }
             }
         }
@@ -236,25 +266,10 @@ class MainActivity : AppCompatActivity() {
                 STARTED_BROADCAST,
                 STOPPED_BROADCAST -> {
                     updateStatus()
-                    if (action == STOPPED_BROADCAST) {
-                        val target = pendingMode
-                        pendingMode = null
-                        val restart = pendingServiceRestart
-                        pendingServiceRestart = false
-                        if (target != null) {
-                            getPreferences().edit()
-                                .putString("byedpi_mode", target.name.lowercase(Locale.ROOT))
-                                .apply()
-                            updateStatus()
-                        }
-                        if (target != null || restart) {
-                            startDirect(getPreferences().mode())
-                        }
-                    }
                 }
 
                 FAILED_BROADCAST -> {
-                    if (strategyProbeJob?.isActive != true) {
+                    if (!strategyProbeInProgress) {
                         Toast.makeText(
                             context,
                             getString(R.string.failed_to_start, sender.name),
@@ -274,6 +289,22 @@ class MainActivity : AppCompatActivity() {
 
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        restartModeAfterProfile = savedInstanceState
+            ?.getString(STATE_RESTART_MODE_AFTER_PROFILE)
+            ?.let { name -> runCatching { Mode.valueOf(name) }.getOrNull() }
+
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                combine(
+                    StrategyProbeCoordinator.active,
+                    ServiceTransitionCoordinator.active,
+                ) { probeActive, transitionActive -> probeActive || transitionActive }
+                    .collect { active ->
+                        setStrategyProbeControls(enabled = !active)
+                        updateStatus()
+                    }
+            }
+        }
 
         val intentFilter = IntentFilter().apply {
             addAction(STARTED_BROADCAST)
@@ -305,7 +336,10 @@ class MainActivity : AppCompatActivity() {
         binding.modeRow.setOnClickListener { toggleMode() }
         binding.settingsButton.setOnClickListener { openSettings() }
         binding.strategyBadge.setOnClickListener {
-            restartAfterProfile = appStatus.first == AppStatus.Running
+            if (controlsLocked) return@setOnClickListener
+            restartModeAfterProfile = appStatus
+                .takeIf { it.first == AppStatus.Running }
+                ?.second
             profilePickerRegister.launch(Intent(this, StrategyPickerActivity::class.java))
         }
         binding.telegramSetupButton.setOnClickListener { showTelegramSetup() }
@@ -345,6 +379,13 @@ class MainActivity : AppCompatActivity() {
         unregisterReceiver(receiver)
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        restartModeAfterProfile?.let {
+            outState.putString(STATE_RESTART_MODE_AFTER_PROFILE, it.name)
+        }
+        super.onSaveInstanceState(outState)
+    }
+
     override fun onCreateOptionsMenu(menu: Menu?): Boolean {
         menuInflater.inflate(R.menu.menu_main, menu)
         return true
@@ -377,10 +418,29 @@ class MainActivity : AppCompatActivity() {
         val preferences = getPreferences()
         val mode = preferences.mode()
         if (StrategyProfiles.selected(preferences) == StrategyProfiles.Profile.Auto) {
-            startAutoStrategyProbe(mode)
+            startAutoStrategyProbeWithPermission(mode, shouldRunAfterProbe = true)
         } else {
             startDirect(mode)
         }
+    }
+
+    private fun startAutoStrategyProbeWithPermission(
+        mode: Mode,
+        shouldRunAfterProbe: Boolean,
+    ) {
+        if (controlsLocked) return
+        val request = StrategyProbeCoordinator.Request(mode, shouldRunAfterProbe)
+        if (shouldRunAfterProbe && mode == Mode.VPN) {
+            val intentPrepare = VpnService.prepare(this)
+            if (intentPrepare != null) {
+                if (!StrategyProbeCoordinator.tryBegin(request)) return
+                val launched = runCatching { vpnRegister.launch(intentPrepare) }.isSuccess
+                if (!launched) StrategyProbeCoordinator.finish()
+                return
+            }
+        }
+        if (!StrategyProbeCoordinator.tryBegin()) return
+        startAutoStrategyProbe(mode, shouldRunAfterProbe)
     }
 
     private fun startDirect(mode: Mode) {
@@ -388,21 +448,28 @@ class MainActivity : AppCompatActivity() {
             Mode.VPN -> {
                 val intentPrepare = VpnService.prepare(this)
                 if (intentPrepare != null) {
-                    vpnRegister.launch(intentPrepare)
+                    if (ServiceTransitionCoordinator.prepareStartAfterPermission(Mode.VPN)) {
+                        val launched = runCatching { vpnRegister.launch(intentPrepare) }.isSuccess
+                        if (!launched) ServiceTransitionCoordinator.cancelPrepared()
+                    }
                 } else {
-                    ServiceManager.start(this, Mode.VPN)
+                    ServiceTransitionCoordinator.beginStart(this, Mode.VPN)
                 }
             }
 
-            Mode.Proxy -> ServiceManager.start(this, Mode.Proxy)
+            Mode.Proxy -> ServiceTransitionCoordinator.beginStart(this, Mode.Proxy)
         }
     }
 
     private fun stop() {
-        ServiceManager.stop(this)
+        val (status, mode) = appStatus
+        if (status == AppStatus.Running) {
+            ServiceTransitionCoordinator.beginStop(this, mode)
+        }
     }
 
     private fun toggleConnection() {
+        if (controlsLocked) return
         when (appStatus.first) {
             AppStatus.Halted -> start()
             AppStatus.Running -> stop()
@@ -410,11 +477,32 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun toggleMode() {
-        val current = getPreferences().mode()
+        if (controlsLocked) return
+        val current = if (appStatus.first == AppStatus.Running) {
+            appStatus.second
+        } else {
+            getPreferences().mode()
+        }
         val target = if (current == Mode.VPN) Mode.Proxy else Mode.VPN
         if (appStatus.first == AppStatus.Running) {
-            pendingMode = target
-            stop()
+            val stopMode = appStatus.second
+            val vpnPermission = if (target == Mode.VPN) VpnService.prepare(this) else null
+            if (vpnPermission != null) {
+                if (ServiceTransitionCoordinator.prepareRestartAfterPermission(
+                        stopMode = stopMode,
+                        startMode = target,
+                    )
+                ) {
+                    val launched = runCatching { vpnRegister.launch(vpnPermission) }.isSuccess
+                    if (!launched) ServiceTransitionCoordinator.cancelPrepared()
+                }
+            } else {
+                ServiceTransitionCoordinator.beginRestart(
+                    this,
+                    stopMode = stopMode,
+                    startMode = target,
+                )
+            }
         } else {
             getPreferences().edit()
                 .putString("byedpi_mode", target.name.lowercase(Locale.ROOT))
@@ -441,13 +529,15 @@ class MainActivity : AppCompatActivity() {
         logsRegister.launch(intent)
     }
 
-    private fun startAutoStrategyProbe(targetMode: Mode) {
-        if (strategyProbeJob?.isActive == true) return
+    private fun startAutoStrategyProbe(targetMode: Mode, shouldRunAfterProbe: Boolean) {
+        if (!strategyProbeInProgress) return
 
         strategyProbeJob = lifecycleScope.launch {
             val preferences = getPreferences()
             val previousActive = StrategyProfiles.active(preferences)
+            val probeRunner = StrategyProbeProxyRunner()
             var completed = false
+            var probeStop: ServiceTransitionCoordinator.ProbeStop? = null
             setStrategyProbeControls(enabled = false)
             binding.statusText.setText(R.string.strategy_auto_checking)
             Toast.makeText(
@@ -456,27 +546,44 @@ class MainActivity : AppCompatActivity() {
                 Toast.LENGTH_SHORT,
             ).show()
             try {
-                if (!waitForStatus(AppStatus.Halted, timeoutMs = 4_000L)) {
-                    Toast.makeText(
-                        this@MainActivity,
-                        R.string.strategy_auto_waiting,
-                        Toast.LENGTH_LONG,
-                    ).show()
-                    return@launch
+                val activeMode = appStatus
+                    .takeIf { it.first == AppStatus.Running }
+                    ?.second
+                if (activeMode != null) {
+                    val request = ServiceTransitionCoordinator.beginProbeStop(
+                        applicationContext,
+                        stopMode = activeMode,
+                        recoveryMode = targetMode,
+                    ) ?: return@launch
+                    probeStop = request
+                    val stopped = try {
+                        withTimeoutOrNull(8_000L) {
+                            request.stopped.await()
+                            true
+                        } == true
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (_: Exception) {
+                        false
+                    }
+                    if (!stopped || !ServiceTransitionCoordinator.claimProbeStop(request.id)) {
+                        Toast.makeText(
+                            this@MainActivity,
+                            R.string.strategy_auto_waiting,
+                            Toast.LENGTH_LONG,
+                        ).show()
+                        return@launch
+                    }
+                    probeStop = null
                 }
 
-                val configuredProxyIp =
-                    preferences.getStringNotNull("byedpi_proxy_ip", "127.0.0.1")
-                val proxyIp = when (configuredProxyIp.trim()) {
+                val baseProxyPreferences = ByeDpiProxyUIPreferences(preferences)
+                val proxyIp = when (baseProxyPreferences.ip.trim()) {
                     "", "0.0.0.0" -> "127.0.0.1"
                     "::", "[::]" -> "::1"
-                    else -> configuredProxyIp.trim()
+                    else -> baseProxyPreferences.ip.trim()
                 }
-                val proxyPort = preferences
-                    .getStringNotNull("byedpi_proxy_port", "1080")
-                    .toIntOrNull()
-                    ?.takeIf { it in 1..65535 }
-                    ?: 1080
+                val proxyPort = baseProxyPreferences.port
                 val candidates = buildList {
                     add(previousActive)
                     add(StrategyProfiles.Profile.Strong)
@@ -487,12 +594,17 @@ class MainActivity : AppCompatActivity() {
 
                 var selected: StrategyProfiles.Profile? = null
                 var selectedResult: StrategyProbeResult? = null
-                var runningCandidate: StrategyProfiles.Profile? = null
                 for ((index, candidate) in candidates.withIndex()) {
-                    runningCandidate = null
-                    if (!startProxyCandidate(candidate)) continue
-                    runningCandidate = candidate
-                    val result = probeBlockedEndpoints(proxyIp, proxyPort)
+                    val proxyPreferences = StrategyProfiles.candidatePreferences(
+                        baseProxyPreferences,
+                        candidate,
+                    )
+                    if (!probeRunner.start(proxyPreferences)) continue
+                    val result = try {
+                        probeBlockedEndpoints(proxyIp, proxyPort)
+                    } finally {
+                        probeRunner.stop()
+                    }
                     if (result.isEligible(REQUIRED_PROBE_PRODUCTS) &&
                         result.isBetterThan(
                             selectedResult,
@@ -515,18 +627,10 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 val chosen = selected ?: previousActive
-                val chosenIsRunning = runningCandidate == chosen &&
-                    appStatus.first == AppStatus.Running &&
-                    appStatus.second == Mode.Proxy
-                if (!chosenIsRunning && !startProxyCandidate(chosen)) {
-                    Toast.makeText(
-                        this@MainActivity,
-                        R.string.strategy_auto_waiting,
-                        Toast.LENGTH_LONG,
-                    ).show()
-                    return@launch
-                }
                 StrategyProfiles.applyAutoCandidate(preferences, chosen)
+                preferences.edit()
+                    .putString("byedpi_mode", targetMode.name.lowercase(Locale.ROOT))
+                    .apply()
 
                 if (selected == null) {
                     Toast.makeText(
@@ -542,62 +646,73 @@ class MainActivity : AppCompatActivity() {
                     ).show()
                 }
 
-                if (targetMode == Mode.VPN) {
-                    if (appStatus.first == AppStatus.Running) {
-                        ServiceManager.stop(this@MainActivity)
-                        if (!waitForStatus(AppStatus.Halted, timeoutMs = 4_000L)) {
-                            Toast.makeText(
-                                this@MainActivity,
-                                R.string.strategy_auto_waiting,
-                                Toast.LENGTH_LONG,
-                            ).show()
-                            return@launch
-                        }
+                probeRunner.stop()
+                if (shouldRunAfterProbe) {
+                    if (!ServiceTransitionCoordinator.beginStart(
+                            applicationContext,
+                            startMode = targetMode,
+                        )
+                    ) {
+                        Toast.makeText(
+                            this@MainActivity,
+                            R.string.strategy_auto_waiting,
+                            Toast.LENGTH_LONG,
+                        ).show()
+                        return@launch
                     }
-                    preferences.edit().putString("byedpi_mode", "vpn").apply()
-                    startDirect(Mode.VPN)
+                    // From this point the selected profile is committed. A slow
+                    // STARTED broadcast must not roll preferences back underneath
+                    // a service that is already reading the chosen configuration.
+                    completed = true
+                    if (!waitForStatus(
+                            AppStatus.Running,
+                            expectedMode = targetMode,
+                            timeoutMs = 8_000L,
+                        )
+                    ) {
+                        Toast.makeText(
+                            this@MainActivity,
+                            R.string.strategy_auto_waiting,
+                            Toast.LENGTH_LONG,
+                        ).show()
+                    }
                 } else {
-                    preferences.edit().putString("byedpi_mode", "proxy").apply()
+                    completed = true
                 }
-                completed = true
-                updateStatus()
             } finally {
-                if (!completed) {
-                    withContext(NonCancellable) {
-                        ServiceManager.stop(applicationContext, Mode.Proxy)
-                        waitForStatus(AppStatus.Halted, timeoutMs = 4_000L)
+                withContext(NonCancellable) {
+                    probeRunner.stop()
+                    if (!completed) {
                         StrategyProfiles.applyAutoCandidate(preferences, previousActive)
                         preferences.edit()
                             .putString("byedpi_mode", targetMode.name.lowercase(Locale.ROOT))
                             .apply()
+                        val pendingStop = probeStop
+                        if (pendingStop != null) {
+                            ServiceTransitionCoordinator.abandonProbeStop(
+                                applicationContext,
+                                pendingStop.id,
+                            )
+                        } else if (shouldRunAfterProbe &&
+                            appStatus.first == AppStatus.Halted &&
+                            !ServiceTransitionCoordinator.isActive
+                        ) {
+                            ServiceTransitionCoordinator.beginStart(
+                                applicationContext,
+                                startMode = targetMode,
+                            )
+                        }
                     }
+                    probeRunner.shutdown()
                 }
+                strategyProbeJob = null
+                StrategyProbeCoordinator.finish()
                 if (!isDestroyed) {
                     setStrategyProbeControls(enabled = true)
                     updateStatus()
                 }
             }
         }
-    }
-
-    private suspend fun startProxyCandidate(profile: StrategyProfiles.Profile): Boolean {
-        val preferences = getPreferences()
-        StrategyProfiles.stageAutoCandidate(preferences, profile)
-        if (appStatus.first == AppStatus.Running) {
-            ServiceManager.stop(this)
-            if (!waitForStatus(AppStatus.Halted, timeoutMs = 4_000L)) return false
-        }
-        ServiceManager.start(this, Mode.Proxy)
-        val started = waitForStatus(
-            AppStatus.Running,
-            expectedMode = Mode.Proxy,
-            timeoutMs = 5_000L,
-        )
-        if (!started) {
-            ServiceManager.stop(this, Mode.Proxy)
-            waitForStatus(AppStatus.Halted, timeoutMs = 2_000L)
-        }
-        return started
     }
 
     private suspend fun waitForStatus(
@@ -930,6 +1045,14 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        if (strategyProbeInProgress) {
+            binding.routeDial.setRunning(false)
+            binding.statusText.setText(R.string.strategy_auto_checking)
+            binding.statusButton.setText(R.string.strategy_auto_checking)
+            stopMetricsLoop()
+        }
+        if (controlsLocked) binding.statusButton.isEnabled = false
+
         val stateChanged = lastVisualStatus != null &&
             (lastVisualStatus != status || lastVisualMode != selectedMode)
         lastVisualStatus = status
@@ -939,6 +1062,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun setStrategyProbeControls(enabled: Boolean) {
         binding.routeDial.isEnabled = enabled
+        binding.statusButton.isEnabled = enabled
         binding.modeRow.isEnabled = enabled
         binding.strategyBadge.isEnabled = enabled
         binding.settingsButton.isEnabled = enabled
