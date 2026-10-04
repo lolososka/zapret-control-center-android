@@ -47,8 +47,11 @@ class TelegramWsProxyService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     /** Native StartProxy/StopProxy are process-global and must never overlap. */
     private val operationMutex = Mutex()
+    @Volatile
     private var operationJob: Job? = null
+    @Volatile
     private var stopQueued = false
+    @Volatile
     private var destroyed = false
 
     companion object {
