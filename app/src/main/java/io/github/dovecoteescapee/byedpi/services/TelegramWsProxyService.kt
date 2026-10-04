@@ -15,10 +15,13 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import io.github.dovecoteescapee.byedpi.R
 import io.github.dovecoteescapee.byedpi.activities.MainActivity
-import io.github.dovecoteescapee.byedpi.core.TelegramWsProxy
 import io.github.dovecoteescapee.byedpi.core.ConnectionDiagnostics
+import io.github.dovecoteescapee.byedpi.core.TelegramProxyPortSelector
+import io.github.dovecoteescapee.byedpi.core.TelegramWsProxy
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
@@ -28,6 +31,11 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
@@ -37,7 +45,11 @@ import kotlinx.coroutines.Job
 
 class TelegramWsProxyService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private var startJob: Job? = null
+    /** Native StartProxy/StopProxy are process-global and must never overlap. */
+    private val operationMutex = Mutex()
+    private var operationJob: Job? = null
+    private var stopQueued = false
+    private var destroyed = false
 
     companion object {
         const val ACTION_START = "io.github.lolososka.zapretmobile.TG_WS_START"
@@ -47,7 +59,7 @@ class TelegramWsProxyService : Service() {
         private const val PREFS = "telegram_ws_proxy"
         private const val SECRET = "secret"
         private const val PORT = "port"
-        private const val DEFAULT_PORT = 1443
+        private val DEFAULT_PORT = TelegramProxyPortSelector.DEFAULT_PORT
         private val _running = MutableStateFlow(false)
         val running: StateFlow<Boolean> = _running
         private val _starting = MutableStateFlow(false)
@@ -68,7 +80,9 @@ class TelegramWsProxyService : Service() {
         }
 
         fun stop(context: android.content.Context) {
-            _starting.value = false
+            // Keep the UI in a busy state until the serialized native teardown
+            // has completed; otherwise a quick second tap can enqueue START.
+            _starting.value = true
             val intent = Intent(context, TelegramWsProxyService::class.java).setAction(ACTION_STOP)
             // The app is in the foreground when this is called. Starting a
             // normal service here avoids creating a second foreground start
@@ -86,17 +100,29 @@ class TelegramWsProxyService : Service() {
 
         fun secretForLink(context: android.content.Context): String {
             val prefs = context.getSharedPreferences(PREFS, MODE_PRIVATE)
-            val secret = prefs.getString(SECRET, null) ?: ByteArray(16).also {
-                SecureRandom().nextBytes(it)
-            }.joinToString("") { "%02x".format(it) }.also {
+            val stored = prefs.getString(SECRET, null)
+            val secret = stored.takeIf { isValidSecret(it) } ?: generateSecret().also {
                 prefs.edit().putString(SECRET, it).apply()
             }
             return "dd$secret"
         }
 
-        fun portForLink(context: Context): Int =
-            if (_running.value) _port.value
-            else context.getSharedPreferences(PREFS, MODE_PRIVATE).getInt(PORT, DEFAULT_PORT)
+        fun portForLink(context: Context): Int {
+            if (_running.value) return _port.value
+            val prefs = context.getSharedPreferences(PREFS, MODE_PRIVATE)
+            val stored = runCatching { prefs.getInt(PORT, DEFAULT_PORT) }
+                .getOrDefault(DEFAULT_PORT)
+            val port = TelegramProxyPortSelector.sanitize(stored)
+            if (stored != port) prefs.edit().putInt(PORT, port).apply()
+            return port
+        }
+
+        private fun isValidSecret(value: String?): Boolean =
+            value?.length == 32 && value.all { it in "0123456789abcdefABCDEF" }
+
+        private fun generateSecret(): String = ByteArray(16).also {
+            SecureRandom().nextBytes(it)
+        }.joinToString("") { "%02x".format(it) }
     }
 
     override fun onCreate() {
@@ -105,6 +131,7 @@ class TelegramWsProxyService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (destroyed) return START_NOT_STICKY
         when (intent?.action) {
             ACTION_START -> startProxy()
             ACTION_STOP -> stopProxy()
@@ -114,7 +141,10 @@ class TelegramWsProxyService : Service() {
     }
 
     private fun startProxy() {
-        if (_running.value || startJob?.isActive == true) return
+        // The companion start() marks _starting before Android delivers the
+        // intent. Use the actual queued job as the duplicate guard; checking
+        // _starting here would reject the very first start request.
+        if (destroyed || _running.value || operationJob?.isActive == true || stopQueued) return
         _starting.value = true
         val notification = notification(getString(R.string.telegram_ws_starting))
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
@@ -122,31 +152,51 @@ class TelegramWsProxyService : Service() {
         } else {
             startForeground(NOTIFICATION_ID, notification)
         }
-        startJob = scope.launch {
-            val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
-            val secret = prefs.getString(SECRET, null) ?: createSecret().also {
-                prefs.edit().putString(SECRET, it).apply()
+        operationJob = scope.launch {
+            operationMutex.withLock {
+                startProxyLocked()
             }
+        }.also { job ->
+            job.invokeOnCompletion {
+                if (operationJob === job) operationJob = null
+            }
+        }
+    }
+
+    /** Runs under [operationMutex], so a stop can never race native startup. */
+    private suspend fun startProxyLocked() {
+            val prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
+            var nativeStarted = false
+            var selectedPort: Int? = null
+            var lastResult = -3
             try {
+                val secret = prefs.getString(SECRET, null).takeIf { isValidSecret(it) } ?: createSecret().also {
+                    prefs.edit().putString(SECRET, it).apply()
+                }
                 TelegramWsProxy.configure(
                     poolSize = 4,
                     cacheDir = cacheDir.absolutePath,
                     cloudflare = true,
                     domain = "",
                 )
-                val preferredPort = prefs.getInt(PORT, DEFAULT_PORT)
-                val attemptedPorts = linkedSetOf(preferredPort)
-                attemptedPorts.addAll(findAvailablePorts(3))
+                val storedPort = runCatching { prefs.getInt(PORT, DEFAULT_PORT) }
+                    .getOrDefault(DEFAULT_PORT)
+                val attemptedPorts = TelegramProxyPortSelector.candidates(
+                    storedPort,
+                    findAvailablePorts(7),
+                )
 
-                var selectedPort: Int? = null
-                var lastResult = -3
                 for (candidatePort in attemptedPorts) {
+                    if (!currentCoroutineContext().isActive) throw CancellationException()
                     lastResult = TelegramWsProxy.start("127.0.0.1", candidatePort, "", secret)
-                    if (lastResult == 0 && waitForPort(candidatePort)) {
+                    if (lastResult != 0) continue
+                    nativeStarted = true
+                    if (waitForPort(candidatePort)) {
                         selectedPort = candidatePort
                         break
                     }
-                    if (lastResult == 0) runCatching { TelegramWsProxy.stop() }
+                    runCatching { TelegramWsProxy.stop() }
+                    nativeStarted = false
                 }
 
                 if (selectedPort != null) {
@@ -163,20 +213,25 @@ class TelegramWsProxyService : Service() {
                         "Telegram MTProto",
                         "native start returned $lastResult; unable to bind a local port",
                     )
-                    _running.value = false
-                    _starting.value = false
                     updateNotification(getString(R.string.telegram_ws_failed))
                     stopSelf()
                 }
+            } catch (error: CancellationException) {
+                throw error
             } catch (error: Throwable) {
                 Log.e("TelegramWsProxy", "Failed to start MTProto proxy", error)
                 ConnectionDiagnostics.record(this@TelegramWsProxyService, "Telegram MTProto", error)
-                _running.value = false
-                _starting.value = false
                 updateNotification(getString(R.string.telegram_ws_failed))
                 stopSelf()
+            } finally {
+                if (selectedPort == null && nativeStarted) {
+                    withContext(NonCancellable) {
+                        runCatching { TelegramWsProxy.stop() }
+                    }
+                }
+                if (selectedPort == null) _running.value = false
+                _starting.value = false
             }
-        }
     }
 
     private suspend fun waitForPort(port: Int): Boolean {
@@ -208,13 +263,30 @@ class TelegramWsProxyService : Service() {
     }
 
     private fun stopProxy() {
-        scope.launch {
-            runCatching { TelegramWsProxy.stop() }
-            _running.value = false
-            _starting.value = false
-            @Suppress("DEPRECATION")
-            stopForeground(true)
-            stopSelf()
+        if (stopQueued) return
+        stopQueued = true
+        // Treat teardown as busy too. This prevents a rapid second tap from
+        // enqueueing a new native StartProxy before StopProxy has completed.
+        _starting.value = true
+        operationJob = scope.launch {
+            operationMutex.withLock {
+                try {
+                    withContext(NonCancellable) {
+                        runCatching { TelegramWsProxy.stop() }
+                    }
+                } finally {
+                    _running.value = false
+                    _starting.value = false
+                    stopQueued = false
+                    @Suppress("DEPRECATION")
+                    stopForeground(true)
+                    stopSelf()
+                }
+            }
+        }.also { job ->
+            job.invokeOnCompletion {
+                if (operationJob === job) operationJob = null
+            }
         }
     }
 
@@ -254,11 +326,20 @@ class TelegramWsProxyService : Service() {
         getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
     override fun onDestroy() {
-        if (_running.value) runCatching { TelegramWsProxy.stop() }
+        destroyed = true
+        operationJob?.cancel()
         _running.value = false
         _starting.value = false
-        startJob?.cancel()
-        scope.cancel()
+        // Keep cleanup outside the cancelled start job and serialize it with
+        // any in-flight native call. Android may recreate the service after
+        // process pressure, so leaving the global Rust state half-open here is
+        // worse than a short asynchronous teardown.
+        scope.launch(NonCancellable) {
+            operationMutex.withLock {
+                runCatching { TelegramWsProxy.stop() }
+            }
+            scope.cancel()
+        }
         super.onDestroy()
     }
 

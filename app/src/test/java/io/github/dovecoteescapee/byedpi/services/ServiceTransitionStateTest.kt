@@ -155,4 +155,21 @@ class ServiceTransitionStateTest {
         assertFalse(state.isActive)
         assertFalse(state.claimProbeStop(probe.id))
     }
+
+    @Test
+    fun failedProbeStopCannotBeClaimedAsReleased() {
+        val state = ServiceTransitionState()
+        val probe = requireNotNull(
+            state.beginProbeStop(
+                stopMode = Mode.Proxy,
+                recoveryMode = Mode.VPN,
+            ),
+        )
+
+        state.onServiceEvent(FAILED_BROADCAST, Mode.Proxy, probe.id)
+
+        assertTrue(probe.stopped.isCompleted)
+        assertFalse(state.isActive)
+        assertFalse(state.claimProbeStop(probe.id))
+    }
 }

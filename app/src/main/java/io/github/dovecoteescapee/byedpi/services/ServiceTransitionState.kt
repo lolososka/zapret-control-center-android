@@ -219,9 +219,16 @@ internal class ServiceTransitionState {
                 }
 
                 Phase.ProbeStopping -> {
-                    if (mode != current.stopMode ||
-                        action !in setOf(STOPPED_BROADCAST, FAILED_BROADCAST)
-                    ) return@synchronized Effect()
+                    if (mode != current.stopMode) return@synchronized Effect()
+                    // A failed stop is not proof that the listener was
+                    // released. Never let the strategy probe claim the port
+                    // after a FAILED broadcast; doing so can race the old
+                    // native service and make the next strategy look broken.
+                    if (action == FAILED_BROADCAST) {
+                        finishLocked(current.id)
+                        return@synchronized Effect()
+                    }
+                    if (action != STOPPED_BROADCAST) return@synchronized Effect()
                     if (current.recoverWhenStopped) {
                         current.phase = Phase.Starting
                         val target = requireNotNull(current.startMode)
