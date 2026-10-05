@@ -21,6 +21,7 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import io.github.dovecoteescapee.byedpi.BuildConfig
 import io.github.dovecoteescapee.byedpi.R
 import io.github.dovecoteescapee.byedpi.core.AppUpdateRepository
+import io.github.dovecoteescapee.byedpi.core.UpdateNoticePolicy
 import io.github.dovecoteescapee.byedpi.core.UpdateMembershipRepository
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.CancellationException
@@ -33,6 +34,9 @@ class UpdateActivity : AppCompatActivity() {
     private lateinit var progress: ProgressBar
     private lateinit var primaryButton: MaterialButton
     private lateinit var channelButton: MaterialButton
+    private lateinit var updateNotice: View
+    private lateinit var updateNoticeVersion: TextView
+    private lateinit var updateNoticeButton: MaterialButton
     private var release: AppUpdateRepository.Release? = null
     private var pendingInstall: File? = null
     private var work: Job? = null
@@ -65,9 +69,23 @@ class UpdateActivity : AppCompatActivity() {
         progress = findViewById(R.id.update_progress)
         primaryButton = findViewById(R.id.update_primary)
         channelButton = findViewById(R.id.update_channel)
+        updateNotice = findViewById(R.id.update_notice)
+        updateNoticeVersion = findViewById(R.id.update_notice_version)
+        updateNoticeButton = findViewById(R.id.update_notice_download)
 
         versionText.text = getString(R.string.update_current_version, BuildConfig.VERSION_NAME)
         primaryButton.setOnClickListener { handlePrimaryAction() }
+        updateNoticeButton.setOnClickListener {
+            val current = release ?: return@setOnClickListener
+            if (hasVerifiedSubscription) {
+                if (pendingInstall != null) requestInstall(requireNotNull(pendingInstall))
+                else downloadAndInstall(current)
+            } else {
+                // Keep the banner download action gated even if the grant expires
+                // while the activity is in the foreground.
+                updateNotice.visibility = View.GONE
+            }
+        }
         channelButton.setOnClickListener {
             val session = access.session
             if (session != null && release?.let { session.isValid(it.version) } == true) {
@@ -107,6 +125,7 @@ class UpdateActivity : AppCompatActivity() {
                 else R.string.update_membership_confirm,
             )
         }
+        refreshUpdateNotice()
     }
 
     override fun onDestroy() {
@@ -169,6 +188,7 @@ class UpdateActivity : AppCompatActivity() {
     }
 
     private fun renderIdle() {
+        refreshUpdateNotice(null)
         statusText.text = ""
         statusText.visibility = View.INVISIBLE
         progress.visibility = View.GONE
@@ -384,6 +404,7 @@ class UpdateActivity : AppCompatActivity() {
     }
 
     private fun renderCurrent() {
+        refreshUpdateNotice(null)
         progress.visibility = View.GONE
         statusText.visibility = View.VISIBLE
         statusText.setText(R.string.update_current)
@@ -395,6 +416,7 @@ class UpdateActivity : AppCompatActivity() {
     }
 
     private fun renderAvailable(current: AppUpdateRepository.Release) {
+        refreshUpdateNotice(current)
         progress.visibility = View.GONE
         statusText.visibility = View.VISIBLE
         val hasSession = access.session?.isValid(current.version) == true
@@ -425,6 +447,7 @@ class UpdateActivity : AppCompatActivity() {
     }
 
     private fun setBusy(message: Int, indeterminate: Boolean) {
+        updateNoticeButton.isEnabled = false
         statusText.visibility = View.VISIBLE
         statusText.setText(message)
         progress.visibility = View.VISIBLE
@@ -434,6 +457,7 @@ class UpdateActivity : AppCompatActivity() {
     }
 
     private fun showError(message: Int) {
+        refreshUpdateNotice(allowAction = true)
         progress.visibility = View.GONE
         statusText.visibility = View.VISIBLE
         statusText.setText(message)
@@ -445,6 +469,29 @@ class UpdateActivity : AppCompatActivity() {
             if (access.session?.let { session -> release?.let { session.isValid(it.version) } } == true)
                 R.string.update_open_bot else R.string.update_channel,
         )
+    }
+
+    /**
+     * Renders the separate update banner only after the membership backend has
+     * granted access for this exact release. The click handler checks the grant
+     * again, so an expired short-lived grant cannot be used for downloading.
+     */
+    private fun refreshUpdateNotice(
+        current: AppUpdateRepository.Release? = release,
+        allowAction: Boolean = false,
+    ) {
+        val show = current != null && UpdateNoticePolicy.shouldShow(
+            releaseAvailable = true,
+            membershipVerified = hasVerifiedSubscription,
+        )
+        updateNotice.visibility = if (show) View.VISIBLE else View.GONE
+        if (!show) return
+        updateNoticeVersion.text = getString(R.string.update_notice_version, current.version)
+        updateNoticeButton.setText(
+            if (pendingInstall != null) R.string.update_install
+            else R.string.update_download_install,
+        )
+        updateNoticeButton.isEnabled = allowAction || work?.isActive != true
     }
 
     private fun openChannel() {

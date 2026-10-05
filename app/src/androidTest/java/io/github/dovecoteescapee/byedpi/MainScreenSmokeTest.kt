@@ -55,8 +55,10 @@ class MainScreenSmokeTest {
             instrumentation.waitForIdleSync()
             scenario.onActivity { activity ->
                 val action = activity.findViewById<TextView>(R.id.update_primary)
+                val notice = activity.findViewById<View>(R.id.update_notice)
                 assertTrue("Update action has no label", action.text.isNotBlank())
                 assertTrue("Update action is clipped", action.isShown && action.width > 0)
+                assertTrue("Update notice leaked before membership verification", notice.visibility != View.VISIBLE)
             }
             screenshot("update.png")
         }

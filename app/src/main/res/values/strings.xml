@@ -150,6 +150,8 @@
     <string name="update_checking">Проверка…</string>
     <string name="update_current">Установлена последняя версия</string>
     <string name="update_available">Доступна версия %1$s</string>
+    <string name="update_notice_title">Доступно обновление</string>
+    <string name="update_notice_version">Версия %1$s</string>
     <string name="update_subscription_unavailable">Проверка подписки пока недоступна. Обновление — в канале.</string>
     <string name="update_membership_title">Проверка подписки</string>
     <string name="update_membership_privacy">Бот получит ваш Telegram ID для проверки подписки на @Slag0dworld. Переписка не запрашивается.</string>
