@@ -480,13 +480,17 @@ class UpdateActivity : AppCompatActivity() {
         current: AppUpdateRepository.Release? = release,
         allowAction: Boolean = false,
     ) {
-        val show = current != null && UpdateNoticePolicy.shouldShow(
+        val visibleRelease = current ?: run {
+            updateNotice.visibility = View.GONE
+            return
+        }
+        val show = UpdateNoticePolicy.shouldShow(
             releaseAvailable = true,
             membershipVerified = hasVerifiedSubscription,
         )
         updateNotice.visibility = if (show) View.VISIBLE else View.GONE
         if (!show) return
-        updateNoticeVersion.text = getString(R.string.update_notice_version, current.version)
+        updateNoticeVersion.text = getString(R.string.update_notice_version, visibleRelease.version)
         updateNoticeButton.setText(
             if (pendingInstall != null) R.string.update_install
             else R.string.update_download_install,
